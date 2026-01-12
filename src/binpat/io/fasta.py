@@ -6,8 +6,8 @@ FASTA I/O utilities for the binary-pattern + ESM2 workflow.
 What's here:
 - FASTA parsing.
 - Validation (handled via binpat.look_up helpers).
-- Helpers for "Skip + report" (which is ultimately implemented at call site).
-- FASTA writing (which support "starred" records to mark sequences that were skipped).
+- Helpers for "Skip + report" (ultimately implemented at call site).
+- FASTA writing ("starred" records to mark sequences that were skipped).
 """
 
 from __future__ import annotations
@@ -149,7 +149,7 @@ def validate_sequence_chars(
 
     Use cases:
     - to catch weird characters early (digits, punctuation, etc.)
-    - before you decide on a stricter AA20-only policy
+    - before using a strict AA20-only policy
     """
     s = seq.strip().upper()
     allowed = set(FASTA_PROTEIN_ALPHABET)
@@ -192,7 +192,7 @@ def assert_is_hp_token_pattern(
 
     Notes
     -----
-    - We allow lowercase by default because your convention uses lowercase for p/c/g.
+    - We allow lowercase by default because convention uses lowercase for p/c/g.
     - If allow_lowercase=True, uppercase P/C/G in token patterns will be rejected (on purpose)
       to avoid confusing token patterns with AA sequences.
     """
@@ -205,8 +205,7 @@ def assert_is_hp_token_pattern(
     # If someone provides lowercase, keep it; if they provide uppercase, that's fine for H/P
     # but we intentionally require p/c/g to be lowercase by convention.
     if allow_lowercase:
-        # Accept H and P in either case? Better to normalize H/P to uppercase in later steps.
-        # Here we simply validate character-by-character with a strict convention:
+        # Validate character-by-character with a strict convention:
         # - H and P allowed in uppercase only
         # - p/c/g allowed in lowercase only
         for ch in s:
@@ -221,7 +220,7 @@ def assert_is_hp_token_pattern(
         if any(ch in {"C", "G"} for ch in s):
             raise ValueError("Token pattern contains uppercase 'C' or 'G'. Use lowercase 'c'/'g' tokens instead.")
         # Uppercase 'P' is allowed (polar token), but uppercase 'P' as Proline is ambiguous;
-        # Proline token must be 'p'. So we disallow a literal residue 'P' only by policy elsewhere.
+        # Proline token must be 'p'. We disallow a literal residue 'P' only by policy elsewhere.
         # Here we just enforce that proline token is lowercase 'p' when intended.
         return
 
@@ -264,7 +263,7 @@ def tokenize_records_strict(
 def read_and_tokenize_fasta_strict(
     fasta_path: PathLike,
 ) -> Tuple[List[TokenizedRecord], List[SkippedRecord]]:
-    """Convenience wrapper: read FASTA from disk, then tokenize with strict AA20-only policy."""
+    """Convenience wrapper: read FASTA, then tokenize with strict AA20-only policy."""
     records = list(iter_fasta_records(fasta_path))
     return tokenize_records_strict(records)
 

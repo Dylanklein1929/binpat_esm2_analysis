@@ -23,7 +23,7 @@ Phase 2:
 
 Installation
 ------------
-Supported platforms:
+Supported platforms:  
   Phase 1 -> any Linux/macOS with conda and mkdssp  
   Phase 2 -> Linux with NVIDIA GPU + CONDA drivers (HPC modules or local CUDA)  
 

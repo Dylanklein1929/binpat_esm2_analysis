@@ -11,6 +11,11 @@ dependencies = [
     "pandas",
     "requests",
     "matplotlib",
+    "fair-esm",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "tqdm",
 ]
 
 [build-system]

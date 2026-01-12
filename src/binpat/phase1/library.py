@@ -254,7 +254,7 @@ def _instantiate_from_tokens(
         elif tok == "g":
             out.append("G")
         else:
-            # defensive; token patterns are validated upstream
+            # token patterns are validated upstream
             raise ValueError(f"Unknown token '{tok}'")
     return "".join(out)
 

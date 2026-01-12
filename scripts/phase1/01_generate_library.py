@@ -13,9 +13,9 @@ Phase 1, Step 1:
     - variants_metadata.csv
     - skipped_templates.csv
 
-This script is intentionally thin "glue":
-- FASTA I/O lives in binpat.io.fasta
-- generation logic lives in binpat.phase1.library
+This script utilizes:
+- FASTA I/O, lives in binpat.io.fasta
+- generation logic, lives in binpat.phase1.library
 """
 
 from __future__ import annotations
@@ -175,10 +175,7 @@ def main() -> None:
         # Token patterns: validate+skip invalid token patterns at read time, then generate
         token_records, skipped_in_reader = read_hp_token_fasta_strict(args.token_fasta)
         res = generate_library_from_records(token_records=token_records, spec=spec)
-        # Note: generate_library_from_records also validates tokens, so skipped_templates may include
-        # overlaps with skipped_in_reader if you pass invalid records through. We don't pass them through,
-        # so skipped_templates should reflect only what library.py skipped (likely none for token input).
-        # If you want a combined report, we can merge these later.
+
 
     # --- Write outputs ---
     variants_fasta = outdir / "variants.fasta"

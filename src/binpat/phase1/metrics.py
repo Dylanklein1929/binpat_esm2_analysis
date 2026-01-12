@@ -4,7 +4,7 @@ metrics.py
 Phase 1 structural metrics computed from predicted PDBs.
 
 What's here:
-- Pure functions that compute metrics for a single PDB
+- Functions that compute metrics for a single PDB
 - Batch helper that iterates over PDB paths and returns rows + skipped info
 - No hard-coded directory structure; the wrapper script owns globbing / paths
 
@@ -38,7 +38,7 @@ from binpat.io.look_up import DSSP_HELIX, HYDROPHOBIC_CLASSIFY
 
 logger = logging.getLogger(__name__)
 
-# Suppress common structure warnings (same as your script)
+# Suppress common structure warnings
 warnings.simplefilter("ignore")
 
 
@@ -152,7 +152,7 @@ def compute_metrics_for_pdb(
     helix_count = 0
     hydro_rasas: List[float] = []
 
-    # Biopython DSSP tuple indices match your script:
+    # Biopython DSSP tuple indices:
     # [1] aa, [2] ss, [3] rasa
     for key in dssp.keys():
         aa = dssp[key][1]

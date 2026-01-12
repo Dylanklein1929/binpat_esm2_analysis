@@ -49,11 +49,11 @@ brew install dssp (or mkdssp)
 
 1) On a computing cluster:
 ### load system modules (example)
-module purge
-module use /projects/community/modulefiles
-module load miniconda
-module load cuda/12.1
-source "$(conda info --base)/etc/profile.d/conda.sh"
+module purge;
+module use /projects/community/modulefiles;
+module load miniconda;
+module load cuda/12.1;
+source "$(conda info --base)/etc/profile.d/conda.sh";
 
 ### create conda environment
 conda create -n binpat python=3.9 -y

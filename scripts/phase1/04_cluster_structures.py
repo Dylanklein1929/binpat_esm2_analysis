@@ -14,7 +14,7 @@ Writes:
 - outdir/clusters/<template_id>/dendrogram.(png|pdf|svg)  [optional]
 
 Notes:
-- O(N^2) RMSD computation per template_id (pairwise RMSD matrix).
+- O(N^2) RMSD computation per template_id (pairwise RMSD matrix). Could improve this later with caching.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def main() -> None:
             else:
                 missing.append(vid)
 
-        # Require at least 2 structures to cluster
+        # require at least 2 structures to cluster
         if len(pdb_paths) < 2:
             for vid in variant_ids:
                 rows_all.append(
@@ -109,7 +109,7 @@ def main() -> None:
             max_clusters=int(args.max_clusters),
         )
 
-        # --- Compute + cluster inside try/except so we can report failures cleanly ---
+        # --- Compute + cluster inside try/except (helps for reporting failures cleanly) ---
         try:
             ids, rmsd_mat = compute_rmsd_matrix(pdb_paths, atom_name=spec.atom_name)
             Z = compute_linkage_from_rmsd(rmsd_mat, method=spec.linkage_method)
@@ -129,7 +129,7 @@ def main() -> None:
                     rmsd_mat,
                     Z,
                     criterion=spec.criterion,
-                    cutoffs=cutoffs,  # <-- FIX: use local cutoffs
+                    cutoffs=cutoffs,
                     min_clusters=spec.min_clusters,
                     max_clusters=spec.max_clusters,
                 )
@@ -141,7 +141,7 @@ def main() -> None:
             tdir = outdir / "clusters" / str(template_id)
             tdir.mkdir(parents=True, exist_ok=True)
 
-            # Optional dendrogram
+            # optional dendrogram
             if args.dendrogram:
                 fig = plt.figure()
                 dendrogram(Z, labels=ids, orientation="top")
@@ -149,7 +149,7 @@ def main() -> None:
                 fig.savefig(tdir / f"dendrogram.{args.dendrogram_format}", dpi=300)
                 plt.close(fig)
 
-            # Write per-structure assignments (with is_medoid)
+            # Write per-structure assignments
             per_rows: List[dict] = []
             for vid, lab in zip(ids, labels):
                 per_rows.append(
@@ -157,7 +157,7 @@ def main() -> None:
                         "template_id": template_id,
                         "variant_id": vid,
                         "cluster_id": int(lab),
-                        "is_medoid": (vid == medoids[int(lab)]),
+                        "is_medoid": (vid == medoids[int(lab)]), # later used as reference structure for computing average structure
                         "cutoff": cutoff,
                         "silhouette": sil,
                         "n_clusters": n_clusters,

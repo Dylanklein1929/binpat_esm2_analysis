@@ -170,7 +170,7 @@ def _make_summary_table(
         .reset_index()
     )
 
-    # Round like your snapshot
+    # rounding
     for col in ["avg. confidence", "avg. helicity", "avg. hydrophobic rASA", "fraction_with_rasa_below_threshold"]:
         out[col] = out[col].astype(float).round(3)
 
@@ -227,7 +227,7 @@ def main() -> None:
 
     df = pd.read_csv(per_structure_path)
     if df.empty:
-        # Still write a summary header
+        # write a summary header
         _write_csv(
             summary_path,
             [],

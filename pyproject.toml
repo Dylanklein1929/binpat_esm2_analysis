@@ -11,11 +11,15 @@ dependencies = [
     "pandas",
     "requests",
     "matplotlib",
-    "fair-esm",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+gpu = [
     "torch",
     "torchvision",
     "torchaudio",
-    "tqdm",
+    "fair-esm",
 ]
 
 [build-system]

@@ -1,0 +1,338 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Tuple
+
+import numpy as np
+from Bio.PDB import PDBParser, Superimposer
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
+from sklearn.metrics import silhouette_score
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class RMSDClusterSpec:
+    atom_name: str = "CA"
+    linkage_method: str = "single"   # "single", "complete", "average"
+    criterion: str = "distance"       # fcluster criterion
+
+    # Cutoff search
+    min_clusters: int = 2
+    max_clusters: int = 20
+    n_cutoffs: int = 50               # number of candidate cutoffs to test
+    cutoff_min_quantile: float = 0.05
+    cutoff_max_quantile: float = 0.95
+
+    # If set, skip cutoff search and use this distance directly
+    fixed_cutoff: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class ClusterResult:
+    ids: List[str]                 # structure ids in the same order as labels
+    labels: List[int]              # cluster labels (1..K)
+    cutoff: float                  # chosen cutoff distance
+    silhouette: Optional[float]    # None if undefined
+    n_clusters: int
+
+
+def _load_ca_coords(pdb_path: Path, *, structure_id: str, atom_name: str = "CA") -> np.ndarray:
+    """
+    Load CA coordinates as an (N,3) float array.
+    Assumes one model; uses first model found.
+    """
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure(structure_id, str(pdb_path))
+    model = next(structure.get_models())
+
+    coords: List[np.ndarray] = []
+    for atom in model.get_atoms():
+        if atom.get_name() == atom_name:
+            coords.append(atom.get_coord())
+
+    if not coords:
+        raise ValueError(f"No atoms named {atom_name} found in {pdb_path}")
+
+    return np.asarray(coords, dtype=float)
+
+
+def _rmsd_from_coords(fixed: np.ndarray, moving: np.ndarray) -> float:
+    """
+    Superpose moving onto fixed using Bio.PDB.Superimposer and return RMSD.
+    """
+    if fixed.shape != moving.shape:
+        raise ValueError(f"Coordinate arrays differ in shape: {fixed.shape} vs {moving.shape}")
+
+    # Superimposer expects Atom objects, but we can use a trick: create pseudo atoms is annoying.
+    # Easiest: use Superimposer with Atom lists by re-parsing atoms (done elsewhere) OR use Kabsch.
+    # We'll use a simple Kabsch implementation here for speed and to avoid Atom objects.
+    X = fixed
+    Y = moving
+
+    Xc = X - X.mean(axis=0) 
+    Yc = Y - Y.mean(axis=0) 
+
+    C = Yc.T @ Xc
+    V, S, Wt = np.linalg.svd(C)
+    d = np.sign(np.linalg.det(V @ Wt))
+    D = np.diag([1.0, 1.0, d])
+    R = V @ D @ Wt
+    Y_rot = Yc @ R 
+
+    diff = Xc - Y_rot
+    return float(np.sqrt((diff * diff).sum() / X.shape[0]))
+
+
+def compute_rmsd_matrix(
+    pdb_paths: Dict[str, Path],
+    *,
+    atom_name: str = "CA",
+) -> Tuple[List[str], np.ndarray]:
+    """
+    Compute NxN RMSD matrix (CA RMSD after optimal superposition).
+    Args:
+        pdb_paths: mapping structure_id -> pdb_path
+    Returns:
+        (ids, rmsd_matrix)
+    """
+    ids = list(pdb_paths.keys())
+    n = len(ids)
+    coords: Dict[str, np.ndarray] = {}
+
+    for sid in ids:
+        coords[sid] = _load_ca_coords(pdb_paths[sid], structure_id=sid, atom_name=atom_name)
+
+    # Validate same length (same number of CA atoms)
+    lengths = {sid: coords[sid].shape[0] for sid in ids}
+    L0 = lengths[ids[0]]
+    bad = [sid for sid in ids if lengths[sid] != L0]
+    if bad:
+        raise ValueError(
+            f"Not all structures have the same number of {atom_name} atoms. "
+            f"Expected {L0}, mismatches: {[(sid, lengths[sid]) for sid in bad]}"
+        )
+
+    mat = np.zeros((n, n), dtype=float)
+    for i in range(n):
+        mat[i, i] = 0.0
+        for j in range(i + 1, n):
+            rmsd = _rmsd_from_coords(coords[ids[i]], coords[ids[j]])
+            mat[i, j] = rmsd
+            mat[j, i] = rmsd
+
+    return ids, mat
+
+
+def _candidate_cutoffs_from_matrix(
+    rmsd_mat: np.ndarray,
+    *,
+    n_cutoffs: int,
+    qmin: float,
+    qmax: float,
+) -> List[float]:
+    tri = rmsd_mat[np.triu_indices(rmsd_mat.shape[0], k=1)]
+    tri = tri[np.isfinite(tri)]
+    if tri.size == 0:
+        return [0.0]
+    lo = float(np.quantile(tri, qmin))
+    hi = float(np.quantile(tri, qmax))
+    if hi <= lo:
+        return [lo]
+    return list(np.linspace(lo, hi, n_cutoffs))
+
+
+def cluster_from_rmsd_matrix(
+    ids: List[str],
+    rmsd_mat: np.ndarray,
+    *,
+    spec: RMSDClusterSpec = RMSDClusterSpec(),
+) -> ClusterResult:
+    """
+    Hierarchical clustering using linkage on RMSD distances + cutoff selection by silhouette.
+    """
+    if rmsd_mat.shape[0] != rmsd_mat.shape[1]:
+        raise ValueError("rmsd_mat must be square")
+    if rmsd_mat.shape[0] != len(ids):
+        raise ValueError("ids length must match rmsd_mat size")
+
+    if len(ids) < 2:
+        return ClusterResult(ids=ids, labels=[1] * len(ids), cutoff=0.0, silhouette=None, n_clusters=1)
+
+    condensed = squareform(rmsd_mat, checks=False)
+    Z = linkage(condensed, method=spec.linkage_method)
+
+    # Choose cutoff
+    if spec.fixed_cutoff is not None:
+        cutoff = float(spec.fixed_cutoff)
+        labels = fcluster(Z, t=cutoff, criterion=spec.criterion).astype(int).tolist()
+        n_clusters = len(set(labels))
+        sil = None
+        if n_clusters >= 2 and n_clusters < len(ids):
+            sil = float(silhouette_score(rmsd_mat, labels, metric="precomputed"))
+        return ClusterResult(ids=ids, labels=labels, cutoff=cutoff, silhouette=sil, n_clusters=n_clusters)
+
+    cutoffs = _candidate_cutoffs_from_matrix(
+        rmsd_mat,
+        n_cutoffs=spec.n_cutoffs,
+        qmin=spec.cutoff_min_quantile,
+        qmax=spec.cutoff_max_quantile,
+    )
+
+    best = (-np.inf, None, None)  # (sil, cutoff, labels)
+    for c in cutoffs:
+        labels = fcluster(Z, t=float(c), criterion=spec.criterion).astype(int).tolist()
+        k = len(set(labels))
+        if k < spec.min_clusters or k > min(spec.max_clusters, len(ids) - 1):
+            continue
+
+        try:
+            sil = float(silhouette_score(rmsd_mat, labels, metric="precomputed"))
+        except Exception:
+            continue
+
+        if sil > best[0]:
+            best = (sil, float(c), labels)
+
+    if best[1] is None:
+        # fallback: one cluster at max cutoff
+        cutoff = float(max(cutoffs))
+        labels = fcluster(Z, t=cutoff, criterion=spec.criterion).astype(int).tolist()
+        k = len(set(labels))
+        return ClusterResult(ids=ids, labels=labels, cutoff=cutoff, silhouette=None, n_clusters=k)
+
+    sil, cutoff, labels = best
+    k = len(set(labels))
+    return ClusterResult(ids=ids, labels=labels, cutoff=cutoff, silhouette=float(sil), n_clusters=k)
+
+
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
+from sklearn.metrics import silhouette_score
+
+
+@dataclass(frozen=True)
+class RMSDClusterSpec:
+    atom_name: str = "CA"
+    linkage_method: str = "average"   # "single", "complete", "average"
+    criterion: str = "distance"
+
+    # Cutoff search
+    min_clusters: int = 2
+    max_clusters: int = 20
+    n_cutoffs: int = 50
+    cutoff_min_quantile: float = 0.05
+    cutoff_max_quantile: float = 0.95
+
+    fixed_cutoff: Optional[float] = None
+
+
+def compute_linkage_from_rmsd(rmsd_mat: np.ndarray, *, method: str) -> np.ndarray:
+    """
+    Correct SciPy usage: linkage expects condensed distances, not NxN square matrix.
+    """
+    condensed = squareform(rmsd_mat, checks=False)
+    return linkage(condensed, method=method)
+
+
+def cluster_labels_from_linkage(
+    Z: np.ndarray,
+    *,
+    cutoff: float,
+    criterion: str = "distance",
+) -> List[int]:
+    labels = fcluster(Z, t=float(cutoff), criterion=criterion).astype(int).tolist()
+    return labels
+
+
+def candidate_cutoffs_from_rmsd_matrix(
+    rmsd_mat: np.ndarray,
+    *,
+    n_cutoffs: int,
+    qmin: float,
+    qmax: float,
+) -> List[float]:
+    tri = rmsd_mat[np.triu_indices(rmsd_mat.shape[0], k=1)]
+    tri = tri[np.isfinite(tri)]
+    if tri.size == 0:
+        return [0.0]
+    lo = float(np.quantile(tri, qmin))
+    hi = float(np.quantile(tri, qmax))
+    if hi <= lo:
+        return [lo]
+    return list(np.linspace(lo, hi, n_cutoffs))
+
+
+def choose_cutoff_by_silhouette(
+    rmsd_mat: np.ndarray,
+    Z: np.ndarray,
+    *,
+    criterion: str,
+    cutoffs: List[float],
+    min_clusters: int,
+    max_clusters: int,
+) -> Tuple[float, Optional[float], List[int]]:
+    """
+    Returns: (best_cutoff, best_silhouette, best_labels)
+    Silhouette computed with metric='precomputed' since rmsd_mat is a distance matrix.
+    """
+    n = rmsd_mat.shape[0]
+    best_sil = -np.inf
+    best_cut = cutoffs[-1]
+    best_labels = cluster_labels_from_linkage(Z, cutoff=best_cut, criterion=criterion)
+
+    for c in cutoffs:
+        labels = cluster_labels_from_linkage(Z, cutoff=float(c), criterion=criterion)
+        k = len(set(labels))
+        if k < min_clusters or k > min(max_clusters, n - 1):
+            continue
+
+        try:
+            sil = float(silhouette_score(rmsd_mat, labels, metric="precomputed"))
+        except Exception:
+            continue
+
+        if sil > best_sil:
+            best_sil = sil
+            best_cut = float(c)
+            best_labels = labels
+
+    if best_sil == -np.inf:
+        return best_cut, None, best_labels
+
+    return best_cut, best_sil, best_labels
+
+
+def compute_cluster_medoids(
+    ids: List[str],
+    rmsd_mat: np.ndarray,
+    labels: List[int],
+) -> Dict[int, str]:
+    """
+    Medoid per cluster = structure with minimal sum of pairwise distances
+    to all other members of the same cluster.
+    Returns mapping: cluster_id -> medoid_variant_id
+    """
+    labels_arr = np.asarray(labels, dtype=int)
+    medoids: Dict[int, str] = {}
+
+    for cid in sorted(set(labels)):
+        idx = np.where(labels_arr == cid)[0]
+        if idx.size == 1:
+            medoids[cid] = ids[int(idx[0])]
+            continue
+
+        sub = rmsd_mat[np.ix_(idx, idx)]
+        # sum distances per candidate within cluster
+        sums = sub.sum(axis=1)
+        best_local = int(np.argmin(sums))
+        medoids[cid] = ids[int(idx[best_local])]
+
+    return medoids

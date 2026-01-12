@@ -1,0 +1,8 @@
+randomization:
+  num_variants_per_input: 5
+  rng_seed: 123
+
+replacement_pools:
+  hydrophobic: [F, L, I, M, V]
+  polar: [E, D, K, N, Q, H]
+

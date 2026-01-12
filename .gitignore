@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+
+# venv
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Outputs / data (adjust to your project)
+results/
+data_test/test_results/
+*.pdb
+*.npz
+*.pt
+*.pth
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+

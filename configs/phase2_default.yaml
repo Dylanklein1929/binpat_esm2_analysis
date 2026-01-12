@@ -1,0 +1,19 @@
+# phase2_default.yaml
+# Defaults for Phase 2: ESM2 embeddings + PCA projection + PC-to-structure mapping
+# (No structure prediction code here; just parameter defaults.)
+
+esm2:
+  model_name: "esm2_t36_3B_UR50D"
+  layer: "final"            # or an integer later if you support intermediate layers
+  representation: "per_residue"   # per_residue or per_sequence (depending on your design)
+
+pca:
+  n_components: 3
+  center: true
+  whiten: false
+
+pc_structure_mapping:
+  # when writing residue-level PC scores into PDB B-factor:
+  # how to map residue value -> atoms in that residue
+  residue_to_atom: "broadcast"     # broadcast, backbone_only, ca_only
+  bfactor_format: "%.3f"           # formatting preference

@@ -1,0 +1,19 @@
+# phase1_default.yaml
+# Defaults for Phase 1: combinatorial library generation + analysis
+#
+# Replacement pools are experiment knobs (configurable).
+# By default, they mirror the fixed classification sets used for tokenization.
+
+randomization:
+  num_variants_per_input: 100
+  seed: 42  # for random selection of amino acids
+  preserve_special_locked: true   # p/c/g positions stay as P/C/G
+
+replacement_pools:
+  hydrophobic: [A, V, I, L, M, F, W, Y]   # default mirrors HYDROPHOBIC_CLASSIFY
+  polar:       [R, K, D, E, N, Q, S, T, H] # default mirrors POLAR_CLASSIFY
+
+# Optional: output naming conventions
+outputs:
+  variants_fasta_name: "variants.fasta"
+  metadata_table_name: "variants_metadata.csv"

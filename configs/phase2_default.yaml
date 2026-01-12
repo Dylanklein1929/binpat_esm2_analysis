@@ -1,11 +1,10 @@
 # phase2_default.yaml
 # Defaults for Phase 2: ESM2 embeddings + PCA projection + PC-to-structure mapping
-# (No structure prediction code here; just parameter defaults.)
 
 esm2:
   model_name: "esm2_t36_3B_UR50D"
-  layer: "final"            # or an integer later if you support intermediate layers
-  representation: "per_residue"   # per_residue or per_sequence (depending on your design)
+  layer: "final"            # or an integer for intermediate layers
+  representation: "per_residue"   # per_residue or per_sequence
 
 pca:
   n_components: 3

@@ -67,9 +67,8 @@ def _rmsd_from_coords(fixed: np.ndarray, moving: np.ndarray) -> float:
     if fixed.shape != moving.shape:
         raise ValueError(f"Coordinate arrays differ in shape: {fixed.shape} vs {moving.shape}")
 
-    # Superimposer expects Atom objects, but we can use a trick: create pseudo atoms is annoying.
-    # Easiest: use Superimposer with Atom lists by re-parsing atoms (done elsewhere) OR use Kabsch.
-    # We'll use a simple Kabsch implementation here for speed and to avoid Atom objects.
+    # Using Kabsch algorithm for aligning structures; more lightweight/faster
+    # than biopython's Superimposer() tool which must operate on Atom objects.
     X = fixed
     Y = moving
 
@@ -221,7 +220,7 @@ from sklearn.metrics import silhouette_score
 @dataclass(frozen=True)
 class RMSDClusterSpec:
     atom_name: str = "CA"
-    linkage_method: str = "average"   # "single", "complete", "average"
+    linkage_method: str = "single"   # "single", "complete", "average"
     criterion: str = "distance"
 
     # Cutoff search

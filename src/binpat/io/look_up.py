@@ -40,7 +40,7 @@ STOP_CHARS: FrozenSet[str] = frozenset({"*"})
 # FASTA valid characters for protein sequences in your workflow
 FASTA_PROTEIN_ALPHABET: FrozenSet[str] = frozenset(AA_EXTENDED | GAP_CHARS | STOP_CHARS)
 
-# Human-friendly 3-letter codes (useful for PDB parsing, reporting, etc.)
+# 3-letter codes (useful for PDB parsing, reporting, etc.)
 AA1_TO_AA3: Mapping[str, str] = MappingProxyType(
     {
         "A": "ALA",
@@ -84,7 +84,7 @@ HYDROPHOBIC_CLASSIFY: FrozenSet[str] = frozenset({"A", "V", "I", "L", "M", "F", 
 POLAR_CLASSIFY: FrozenSet[str] = frozenset({"R", "K", "D", "E", "N", "Q", "S", "T", "H"})
 
 # Special-locked residues: these keep their identity through the randomization step
-# (in your workflow: Proline/Cysteine/Glycine are preserved as P/C/G).
+# (Proline/Cysteine/Glycine are preserved as P/C/G).
 SPECIAL_LOCKED_AA: FrozenSet[str] = frozenset({"P", "C", "G"})
 
 # Sanity checks (fail fast if something inconsistent is edited later)

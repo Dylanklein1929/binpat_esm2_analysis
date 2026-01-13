@@ -15,6 +15,14 @@ Writes:
 
 Notes:
 - O(N^2) RMSD computation per template_id (pairwise RMSD matrix). Could improve this later with caching.
+
+Example:
+python 04_cluster_structures.py \
+    --outdir outdir/ \
+    --variants-metadata variants_metadata.csv \
+    --linkage single \
+    ==dendrogram
+
 """
 
 from __future__ import annotations
@@ -45,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pdb-dir", type=str, default=None, help="Default: <outdir>/pdbs")
 
     p.add_argument("--atom-name", type=str, default="CA")
-    p.add_argument("--linkage", type=str, default="average", choices=["single", "complete", "average"])
+    p.add_argument("--linkage", type=str, default="single", choices=["single", "complete", "average"])
     p.add_argument("--fixed-cutoff", type=float, default=None, help="Skip silhouette search and use this cutoff.")
     p.add_argument("--n-cutoffs", type=int, default=50)
     p.add_argument("--min-clusters", type=int, default=2)

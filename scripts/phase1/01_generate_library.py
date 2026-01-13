@@ -16,6 +16,10 @@ Phase 1, Step 1:
 This script utilizes:
 - FASTA I/O, lives in binpat.io.fasta
 - generation logic, lives in binpat.phase1.library
+
+Example:
+python 01_generate_library.py --input-fasta input.fasta --config phase1.yaml --outdir outdir/
+
 """
 
 from __future__ import annotations

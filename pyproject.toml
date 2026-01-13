@@ -20,6 +20,8 @@ gpu = [
     "torchvision",
     "torchaudio",
     "fair-esm",
+    "transformers",
+    "accelerate",
 ]
 
 [build-system]

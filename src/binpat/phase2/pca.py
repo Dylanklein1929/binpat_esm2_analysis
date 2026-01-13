@@ -65,7 +65,7 @@ def _iter_residue_batches(
         emb = _load_npz_emb(p, emb_key=emb_key).astype(dtype, copy=False)
         L, D = emb.shape
 
-        # If we have a global cap, truncate emb to what's left
+        # If global cap, truncate emb to what's left
         if max_residues_total is not None:
             remaining = max_residues_total - total
             if remaining <= 0:

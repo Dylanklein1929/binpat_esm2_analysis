@@ -29,7 +29,7 @@ def _write_pdb_lines(path: Path, lines: List[str]) -> None:
 
 def _is_ca_atom_line(line: str) -> bool:
     # PDB atom name columns 13-16 (0-based 12:16)
-    # Many files use " CA " for alpha carbon
+    # Typically " CA " for alpha carbon
     return line.startswith("ATOM") and line[12:16].strip() == "CA"
 
 

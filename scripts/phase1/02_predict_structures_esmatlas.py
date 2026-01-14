@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Dict, Optional, Set
 
 from binpat.io.fasta import iter_fasta_records
+from binpat.io.progress import Progress
 from binpat.phase1.predict_esmatlas import (
     PredictionSpec,
     predict_many,

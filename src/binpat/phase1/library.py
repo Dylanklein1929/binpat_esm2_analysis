@@ -82,6 +82,12 @@ class LibrarySpec:
 
 
 @dataclass(frozen=True)
+class Phase1Outputs:
+    variants_fasta_name: str = "phase1_variants.fasta"
+    metadata_table_name: str = "phase1_metadata.csv"
+
+
+@dataclass(frozen=True)
 class Template:
     """Internal normalized representation of a generation template."""
     template_id: str

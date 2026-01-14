@@ -43,6 +43,7 @@ from binpat.io.fasta import (
 )
 from binpat.phase1.library import (
     LibrarySpec,
+    Phase1Outputs,
     ReplacementPools,
     Variant,
     VariantMetadata,
@@ -76,9 +77,7 @@ def parse_args() -> argparse.Namespace:
 
     return p.parse_args()
 
-
-def load_phase1_config(path: str) -> LibrarySpec:
-    """
+"""
     Expects a config shaped like:
 
     randomization:
@@ -88,6 +87,7 @@ def load_phase1_config(path: str) -> LibrarySpec:
       hydrophobic: [A, V, I, L, M, F, W, Y]
       polar: [R, K, D, E, N, Q, S, T, H]
     """
+def load_phase1_config(path: str) -> tuple[LibrarySpec, Phase1Outputs]:
     cfg_path = Path(path)
     if not cfg_path.exists():
         raise FileNotFoundError(f"Config not found: {cfg_path}")
@@ -96,6 +96,7 @@ def load_phase1_config(path: str) -> LibrarySpec:
 
     rand_cfg = cfg.get("randomization", {})
     pools_cfg = cfg.get("replacement_pools", {})
+    out_cfg = cfg.get("outputs", {}) or {}
 
     num = rand_cfg.get("num_variants_per_input", rand_cfg.get("num_variants_per_template", None))
     if num is None:
@@ -118,7 +119,14 @@ def load_phase1_config(path: str) -> LibrarySpec:
         variant_id_prefix="var",
     )
     spec.validate()
-    return spec
+
+    outputs = Phase1Outputs(
+        variants_fasta_name=str(out_cfg.get("variants_fasta_name", Phase1Outputs.variants_fasta_name)),
+        metadata_table_name=str(out_cfg.get("metadata_table_name", Phase1Outputs.metadata_table_name)),
+    )
+
+    return spec, outputs
+
 
 
 def write_metadata_csv(rows: List[VariantMetadata], out_path: Path) -> None:
@@ -168,7 +176,7 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    spec = load_phase1_config(args.config)
+    spec, outputs = load_phase1_config(args.config)
 
     # --- Read inputs (no redundant tokenization) ---
     if args.input_fasta:
@@ -182,8 +190,13 @@ def main() -> None:
 
 
     # --- Write outputs ---
-    variants_fasta = outdir / "variants.fasta"
-    metadata_csv = outdir / "variants_metadata.csv"
+    # variants and metadata names
+    variants_name = outputs.variants_fasta_name or "variants.fasta"
+    meta_name     = outputs.metadata_table_name or "variants_metadata.csv"
+    # variants and metadata paths
+    variants_fasta = outdir / variants_name
+    metadata_csv   = outdir / meta_name
+    # others
     skipped_csv = outdir / "skipped_templates.csv"
     token_patterns_fasta = outdir / "token_patterns.fasta"
 

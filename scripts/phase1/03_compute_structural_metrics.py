@@ -39,6 +39,7 @@ from binpat.phase1.metrics import (
     get_residues_to_skip_from_file,
 )
 
+from binpat.io.progress import Progress
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute structural metrics from predicted PDBs.")
@@ -281,6 +282,8 @@ def main() -> None:
     metric_rows = []
     skipped_rows = []
 
+    p = Progress(total=len(pdb_paths), label="structures with metrics computed.")
+    num = 0
     for pdb_path in pdb_paths:
         vid = pdb_path.stem
 
@@ -308,6 +311,8 @@ def main() -> None:
 
         try:
             metric_rows.append(compute_metrics_for_pdb(pdb_path, spec=spec, variant_id=vid))
+            p.update(num, extra=vid)
+            num += 1
         except Exception as e:
             skipped_rows.append(SkippedStructure(
                 variant_id=vid,

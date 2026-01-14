@@ -22,6 +22,8 @@ from typing import Dict, List, Optional, Literal
 import logging
 import requests
 
+from binpat.io.progress import Progress
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_ESMATLAS_PDB_ENDPOINT = "https://api.esmatlas.com/foldSequence/v1/pdb/"
@@ -238,7 +240,9 @@ def predict_many(
     out_dir.mkdir(parents=True, exist_ok=True)
     rng = random.Random(rng_seed)
 
+    p = Progress(total=len(sequences), label="structures downloaded")
     results: List[PredictionResult] = []
+    num = 0
     for vid, seq in sequences.items():
         out_pdb = out_dir / f"{vid}.pdb"
         results.append(
@@ -250,6 +254,8 @@ def predict_many(
                 rng=rng,
             )
         )
+        num += 1
+        p.update(num)
     return results
 
 

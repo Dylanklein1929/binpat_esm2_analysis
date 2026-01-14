@@ -32,9 +32,11 @@ import pandas as pd
 from binpat.io.fasta import iter_fasta_records
 from binpat.phase1.metrics import (
     MetricsSpec,
-    compute_metrics_batch,
+    SkippedStructure,
+    compute_metrics_for_pdb,
     metrics_rows_to_dicts,
     skipped_rows_to_dicts,
+    get_residues_to_skip_from_file,
 )
 
 
@@ -59,8 +61,66 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--rasa-threshold", type=float, default=0.25, help="Success threshold for mean hydrophobic rASA.")
     p.add_argument("--model-index", type=int, default=0, help="Model index for multi-model PDBs (default: 0).")
+    
+    p.add_argument(
+        "--residues-to-skip",
+        type=str,
+        default=None,
+        help="Path to file containing comma-separated list of residue indices to omit from structure metric calculation (1-based)."
+    )
+
+    p.add_argument(
+    "--variants-fasta",
+    type=str,
+    default=None,
+    help="FASTA mapping variant_id -> sequence (headers must match variant_id). Required if using --skip-motif.",
+    )
+
+    p.add_argument(
+    "--skip-motif",
+    action="append",
+    default=[],
+    help="Motif to omit from metrics (repeatable). Example: --skip-motif GGGGG",
+    )
 
     return p.parse_args()
+
+
+def _motif_positions_1based(seq: str, motif: str) -> Set[int]:
+    """
+    Return 1-based positions covered by ALL occurrences of motif in seq.
+    Overlapping matches allowed.
+    Example: seq=AAAAAA, motif=AAA => matches at 1-3,2-4,3-5,4-6 => returns {1..6}
+    """
+    seq = seq.upper()
+    motif = motif.upper()
+    if not motif:
+        return set()
+
+    out: Set[int] = set()
+    start = 0
+    while True:
+        i = seq.find(motif, start)
+        if i == -1:
+            break
+        # i is 0-based start index in python string
+        for pos0 in range(i, i + len(motif)):
+            out.add(pos0 + 1)  # 1-based
+        start = i + 1  # allow overlaps
+    return out
+
+
+def _load_variant_sequences(fasta_path: Optional[str]) -> Dict[str, str]:
+    """
+    Load FASTA into a dict: variant_id -> sequence.
+    Uses iter_fasta_records(), which yields FastaRecord(id, seq, description).
+    """
+    if fasta_path is None:
+        return {}
+    seqs: Dict[str, str] = {}
+    for rec in iter_fasta_records(Path(fasta_path)):
+        seqs[str(rec.id)] = str(rec.seq)
+    return seqs
 
 
 def _read_variant_to_group_map(
@@ -192,10 +252,72 @@ def main() -> None:
     if not pdb_paths:
         raise ValueError(f"No PDB files found in {pdb_dir} matching glob '{args.pdb_glob}'")
 
-    spec = MetricsSpec(rasa_threshold=float(args.rasa_threshold), model_index=int(args.model_index))
+    # ----------------------------
+    # Build explicit skip set (1-based positions, as PDB residue numbers)
+    # ----------------------------
+    explicit_skip: Set[int] = set()
+    if args.residues_to_skip is not None:
+        explicit_skip = set(get_residues_to_skip_from_file(Path(args.residues_to_skip)))
 
-    metric_rows, skipped_rows = compute_metrics_batch(pdb_paths, spec=spec)
+    motifs: List[str] = args.skip_motif or []
 
+    # Only load sequences if motifs requested
+    variant_seqs: Dict[str, str] = {}
+    if motifs:
+        if args.variants_fasta is None:
+            raise ValueError("--skip-motif was provided but --variants-fasta was not.")
+        variant_seqs = _load_variant_sequences(args.variants_fasta)
+        if not variant_seqs:
+            raise ValueError(f"No sequences loaded from --variants-fasta: {args.variants_fasta}")
+
+    print("[03_metrics] explicit skip positions (1-based):", sorted(explicit_skip))
+    if motifs:
+        print("[03_metrics] motif skip patterns:", motifs)
+        print(f"[03_metrics] loaded sequences: {len(variant_seqs)}")
+
+    # ----------------------------
+    # Compute per-structure metrics (per-variant skip sets)
+    # ----------------------------
+    metric_rows = []
+    skipped_rows = []
+
+    for pdb_path in pdb_paths:
+        vid = pdb_path.stem
+
+        skip_set: Set[int] = set(explicit_skip)
+
+        # Add motif-derived skip positions
+        if motifs:
+            seq = variant_seqs.get(vid)
+            if seq is None:
+                skipped_rows.append(SkippedStructure(
+                    variant_id=vid,
+                    pdb_path=str(pdb_path),
+                    reason="Missing sequence for variant_id in --variants-fasta (needed for --skip-motif).",
+                ))
+                continue
+
+            for m in motifs:
+                skip_set |= _motif_positions_1based(seq, m)
+
+        spec = MetricsSpec(
+            rasa_threshold=float(args.rasa_threshold),
+            model_index=int(args.model_index),
+            residues_to_skip=skip_set,
+        )
+
+        try:
+            metric_rows.append(compute_metrics_for_pdb(pdb_path, spec=spec, variant_id=vid))
+        except Exception as e:
+            skipped_rows.append(SkippedStructure(
+                variant_id=vid,
+                pdb_path=str(pdb_path),
+                reason=f"{type(e).__name__}: {e}",
+            ))
+
+    # ----------------------------
+    # Write outputs
+    # ----------------------------
     per_structure_path = outdir / "structural_metrics_per_structure.csv"
     summary_path = outdir / "structural_metrics_summary.csv"
     skipped_path = outdir / "skipped_structures.csv"
@@ -222,12 +344,13 @@ def main() -> None:
         empty_header=["variant_id", "pdb_path", "reason"],
     )
 
+    # ----------------------------
     # Build summary
+    # ----------------------------
     vid_to_group = _read_variant_to_group_map(args.variants_metadata, args.group_column)
 
     df = pd.read_csv(per_structure_path)
     if df.empty:
-        # write a summary header
         _write_csv(
             summary_path,
             [],
@@ -246,10 +369,14 @@ def main() -> None:
             lambda vid: vid_to_group.get(str(vid), _default_group_from_variant_id(str(vid)))
         )
 
-        # sequence length proxy: DSSP residue count
+        # sequence length proxy: DSSP residue count (already adjusted for skipping inside metrics)
         df["sequence_length"] = df["n_res_dssp"].astype(float)
 
-        summary_df = _make_summary_table(df, group_col=args.group_column, rasa_threshold=float(args.rasa_threshold))
+        summary_df = _make_summary_table(
+            df,
+            group_col=args.group_column,
+            rasa_threshold=float(args.rasa_threshold),
+        )
         summary_df.to_csv(summary_path, index=False)
 
     print(f"[03_metrics] pdb_dir: {pdb_dir}  (n_pdb={len(pdb_paths)})")

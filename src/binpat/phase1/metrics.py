@@ -24,9 +24,9 @@ Notes:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Set
 
 import logging
 import warnings
@@ -44,11 +44,9 @@ warnings.simplefilter("ignore")
 
 @dataclass(frozen=True)
 class MetricsSpec:
-    """
-    Configuration for structural metrics.
-    """
     rasa_threshold: float = 0.25
-    model_index: int = 0  # use model 0 for PDBs that contain multiple models (rare here)
+    model_index: int = 0
+    residues_to_skip: Set[int] = field(default_factory=set)  # store as PDB resseq ints (1-based)
 
 
 @dataclass(frozen=True)
@@ -89,16 +87,41 @@ def structure_id_from_path(pdb_path: Path) -> str:
     return pdb_path.stem
 
 
-def _compute_mean_bfactor(structure) -> Optional[float]:
+def _compute_mean_bfactor(structure, residues_to_skip: Set[int]) -> Optional[float]:
     bvals: List[float] = []
+    skip = residues_to_skip or set()
+
     for atom in structure.get_atoms():
+        residue = atom.get_parent()
+        resseq = residue.get_id()[1]  # PDB residue number
+        if resseq in skip:
+            continue
         try:
             bvals.append(float(atom.get_bfactor()))
         except Exception:
             continue
+
     if not bvals:
         return None
     return sum(bvals) / len(bvals)
+
+def get_residues_to_skip_from_file(path: Path) -> Set[int]:
+    """
+    File format: comma-separated residue indices (1-based), e.g.:
+      1,2,3,10
+      25,26
+    """
+    out: Set[int] = set()
+    with path.open("r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for tok in line.split(","):
+                tok = tok.strip()
+                if tok:
+                    out.add(int(tok))
+    return out
 
 
 def compute_metrics_for_pdb(
@@ -133,31 +156,24 @@ def compute_metrics_for_pdb(
     # DSSP: relies on mkdssp availability
     dssp = DSSP(model, str(pdb_path))
 
-    n_res = len(dssp)
-    if n_res == 0:
-        # Rare, but handle explicitly
-        return StructureMetrics(
-            variant_id=vid,
-            pdb_path=str(pdb_path),
-            helix_fraction=0.0,
-            mean_hydrophobic_rasa=None,
-            mean_all_atom_bfactor=_compute_mean_bfactor(structure),
-            n_res_dssp=0,
-            n_helix_res=0,
-            n_hydrophobic_res=0,
-            mean_hydrophobic_rasa_leq_threshold=None,
-            note="dssp_returned_zero_residues",
-        )
+    skip = spec.residues_to_skip or set()
 
     helix_count = 0
     hydro_rasas: List[float] = []
+    included_res = 0
 
     # Biopython DSSP tuple indices:
     # [1] aa, [2] ss, [3] rasa
     for key in dssp.keys():
+        resseq = dssp[key][0]
         aa = dssp[key][1]
         ss = dssp[key][2]
         rasa = dssp[key][3]
+
+        if resseq in skip:
+            continue
+
+        included_res += 1
 
         if ss in DSSP_HELIX:
             helix_count += 1
@@ -167,6 +183,23 @@ def compute_metrics_for_pdb(
                 hydro_rasas.append(float(rasa))
             except Exception:
                 pass
+
+    n_res = included_res
+
+    if n_res == 0:
+        # Rare, but handle explicitly
+        return StructureMetrics(
+            variant_id=vid,
+            pdb_path=str(pdb_path),
+            helix_fraction=0.0,
+            mean_hydrophobic_rasa=None,
+            mean_all_atom_bfactor=_compute_mean_bfactor(structure, residues_to_skip=skip),
+            n_res_dssp=0,
+            n_helix_res=0,
+            n_hydrophobic_res=0,
+            mean_hydrophobic_rasa_leq_threshold=None,
+            note="dssp_returned_zero_residues_or_all_residues_skipped",
+        )
 
     helix_fraction = helix_count / n_res if n_res > 0 else 0.0
 
@@ -179,7 +212,7 @@ def compute_metrics_for_pdb(
         mean_hydro_rasa = None
         leq_flag = None
 
-    mean_b = _compute_mean_bfactor(structure)
+    mean_b = _compute_mean_bfactor(structure, skip)
 
     return StructureMetrics(
         variant_id=vid,

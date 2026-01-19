@@ -28,19 +28,27 @@ Supported platforms:
   Phase 2 -> Linux with NVIDIA GPU + CONDA drivers (HPC modules or local CUDA)  
 
 1. clone repository  
-`git clone https://github.com/DylanKlein1929/binpat_esm2_analysis.git
-cd binpat_esm2_analysis`  
+```bash
+git clone https://github.com/DylanKlein1929/binpat_esm2_analysis.git
+cd binpat_esm2_analysis
+```  
 
 **Phase 1 setup only (CPU)**  
 2. create and activate a conda environment (python≥3.9 recommended)
-`conda create -n binpat python=3.9 -y
+```bash
+conda create -n binpat python=3.9 -y
 conda activate binpat`  
+```
 
 2. install python dependencies  
-`pip install -e .`  
+```bash
+pip install -e .
+```  
 
 3. install external dependency  
-`brew install dssp (or mkdssp)`  
+```bash
+brew install dssp (or mkdssp)
+```  
 
 ------------ Phase 1 scripts ready to run -------------
 

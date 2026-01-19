@@ -1,4 +1,4 @@
-Binary-Patterned Protein Design Pipeline
+# Binary-Patterned Protein Design Pipeline
 ----------------------------------------
 This is a modular pipeline for generating combinatorial libraries of sequence variants, predicting their structures
 with ESMFold/ESM atlas, and assessing the results via structural metrics and clustering. The pipeline also includes
@@ -23,24 +23,24 @@ Phase 2:
 
 Installation
 ------------
-# Supported platforms:  
+Supported platforms:  
   Phase 1 -> any Linux/macOS with conda and mkdssp  
   Phase 2 -> Linux with NVIDIA GPU + CONDA drivers (HPC modules or local CUDA)  
 
 1. clone repository
-'git clone https://github.com/DylanKlein1929/binpat_esm2_analysis.git  
-cd binpat_esm2_analysis'  
+`git clone https://github.com/DylanKlein1929/binpat_esm2_analysis.git  
+cd binpat_esm2_analysis`  
 
-*** Phase 1 setup only (CPU)***
-### create and activate a conda environment (python≥3.9 recommended)
-conda create -n binpat python=3.9 -y  
-conda activate binpat  
+**Phase 1 setup only (CPU)**
+2. create and activate a conda environment (python≥3.9 recommended)
+`conda create -n binpat python=3.9 -y  
+conda activate binpat`  
 
-### install python dependencies
-pip install -e .  
+2. install python dependencies
+`pip install -e .`  
 
-### install external dependency
-brew install dssp (or mkdssp)  
+3. install external dependency
+`brew install dssp (or mkdssp)`  
 
 ------------ Phase 1 scripts ready to run -------------
 

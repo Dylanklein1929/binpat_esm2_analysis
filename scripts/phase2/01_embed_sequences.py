@@ -51,6 +51,14 @@ from binpat.phase2.embed_esm2 import EmbedSpec, embed_and_save_many
 from binpat.phase2.selection import SelectionSpec, select_variant_ids
 
 
+# check for torch
+print(f"[env] torch: {torch.__version__}")
+print(f"[env] cuda available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"[env] cuda version: {torch.version.cuda}")
+    print(f"[env] device: {torch.device.get_device_name(0)}")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Phase 2 Step 01: Embed sequences with ESM2.")
     p.add_argument("--outdir", required=True, type=str)

@@ -50,12 +50,11 @@ pip install -e .
 brew install dssp (or mkdssp)
 ```  
 
------------- Phase 1 scripts ready to run -------------
+*Phase 1 scripts ready to run*
 
 
-*** Phase 2 setup included (GPU recommended)***
-
-1) On a computing cluster:
+**Phase 1 + Phase 2 (GPU recommended)**
+On a computing cluster:
 ### load system modules (example)
 module purge  
 module use /projects/community/modulefiles  

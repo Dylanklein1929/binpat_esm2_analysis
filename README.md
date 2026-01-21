@@ -83,7 +83,7 @@ pip install -e ".[gpu]" --only-binary=:all:
 ```
 
 ### run gpu preflight script before running Phase 2
-```python
+```bash
 python scripts/phase2/00_preflight.py  
 ```
 (this reports versions/availability for python, pytorch, cuda, gpu device)  

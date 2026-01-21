@@ -46,6 +46,8 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
+import torch
+
 from binpat.io.fasta import iter_fasta_records
 from binpat.phase2.embed_esm2 import EmbedSpec, embed_and_save_many
 from binpat.phase2.selection import SelectionSpec, select_variant_ids
@@ -56,7 +58,7 @@ print(f"[env] torch: {torch.__version__}")
 print(f"[env] cuda available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
     print(f"[env] cuda version: {torch.version.cuda}")
-    print(f"[env] device: {torch.device.get_device_name(0)}")
+    print(f"[env] device: {torch.cuda.get_device_name(0)}")
 
 
 def parse_args() -> argparse.Namespace:

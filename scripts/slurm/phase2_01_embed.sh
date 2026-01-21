@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=binpat_p2_embed
+#SBATCH --job-name=bp_p2_01
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
@@ -7,14 +7,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
-#SBATCH --output=binpat_p2_embed.%j.out
-#SBATCH --error=binpat_p2_embed.%j.err
+#SBATCH --output=binpat_p2_embed.%x.%j.out
+#SBATCH --error=binpat_p2_embed.%x.%j.err
 #SBATCH --requeue
 #SBATCH --constraint="ampere|volta|adalovelace"
 
 # ---------------- USER VARS (override with --export=ALL,...) ----------------
-REPO_DIR="${REPO_DIR:-$HOME/repos/binpat_esm2_analysis}"
-OUTDIR="${OUTDIR:-$REPO_DIR/results/run001}"
+OUTDIR="${OUTDIR:-$(pwd)}"
 VARIANTS_FASTA="${VARIANTS_FASTA:-$OUTDIR/variants.fasta}"
 
 # selection
@@ -47,14 +46,11 @@ export TMPDIR="${SLURM_TMPDIR:-/tmp}"
 export XDG_CACHE_HOME="$TMPDIR/xdg_${SLURM_JOB_ID:-$$}"
 export TORCH_HOME="$TMPDIR/torch_${SLURM_JOB_ID:-$$}"
 export HF_HOME="$TMPDIR/hf_${SLURM_JOB_ID:-$$}"
-export TRANSFORMERS_CACHE="$HF_HOME"
 export HF_DATASETS_CACHE="$HF_HOME"
 export TOKENIZERS_PARALLELISM=false
 
 mkdir -p "$XDG_CACHE_HOME" "$TORCH_HOME" "$HF_HOME"
-
 # ---------------- Run ----------------
-cd "$REPO_DIR" || exit 2
 
 # Ensure editable install exists (recommended)
 python -c "import binpat; print('binpat import OK')"
@@ -69,7 +65,7 @@ if [ "$MODE" = "ids_file" ]; then
   SEL_FLAGS="$SEL_FLAGS --ids-file $IDS_FILE"
 fi
 
-python scripts/phase2/01_embed_sequences.py \
+python /scratch/dsk129/vik/binpat_dev/binpat_esm2_analysis/scripts/phase2/01_embed_sequences.py \
   --outdir "$OUTDIR" \
   --variants-fasta "$VARIANTS_FASTA" \
   $SEL_FLAGS \

@@ -10,8 +10,6 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 from sklearn.metrics import silhouette_score
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -206,15 +204,6 @@ def cluster_from_rmsd_matrix(
     sil, cutoff, labels = best
     k = len(set(labels))
     return ClusterResult(ids=ids, labels=labels, cutoff=cutoff, silhouette=float(sil), n_clusters=k)
-
-
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
-
-import numpy as np
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import squareform
-from sklearn.metrics import silhouette_score
 
 
 @dataclass(frozen=True)

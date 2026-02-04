@@ -29,7 +29,7 @@ from types import MappingProxyType
 # 20 natural (canonical) amino acids, single-letter codes
 AA20: FrozenSet[str] = frozenset(list("ACDEFGHIKLMNPQRSTVWY"))
 
-# Common ambiguous/extended protein alphabet symbols one might encounter in FASTA
+# Common ambiguous/extended protein alphabet symbols that might be encountered in FASTA
 # B = D or N, Z = E or Q, X = unknown, J = I or L, U = selenocysteine, O = pyrrolysine
 AA_EXTENDED: FrozenSet[str] = frozenset(AA20 | set(list("BJZXUO")))
 
@@ -37,7 +37,7 @@ AA_EXTENDED: FrozenSet[str] = frozenset(AA20 | set(list("BJZXUO")))
 GAP_CHARS: FrozenSet[str] = frozenset({"-", "."})
 STOP_CHARS: FrozenSet[str] = frozenset({"*"})
 
-# FASTA valid characters for protein sequences in your workflow
+# entire set of FASTA valid characters for protein sequences in workflow
 FASTA_PROTEIN_ALPHABET: FrozenSet[str] = frozenset(AA_EXTENDED | GAP_CHARS | STOP_CHARS)
 
 # 3-letter codes (useful for PDB parsing, reporting, etc.)
@@ -71,7 +71,7 @@ AA3_TO_AA1: Mapping[str, str] = MappingProxyType({v: k for k, v in AA1_TO_AA3.it
 # ---------------------------------------------------------
 # Fixed residue classification for reduced-pattern generation
 # ---------------------------------------------------------
-# IMPORTANT: These sets define how you convert AA20 -> reduced tokens.
+# IMPORTANT: These sets define how we convert AA20 -> reduced tokens.
 # They are intended to be stable/scientific definitions for this project.
 #
 # Replacement pools used during randomization should be configurable via YAML/CLI,
@@ -80,7 +80,8 @@ AA3_TO_AA1: Mapping[str, str] = MappingProxyType({v: k for k, v in AA1_TO_AA3.it
 # Hydrophobic/core-favoring residues (Kyte–Doolittle high, common coiled-coil cores)
 HYDROPHOBIC_CLASSIFY: FrozenSet[str] = frozenset({"A", "V", "I", "L", "M", "F", "W", "Y"})
 
-# Polar/charged/solvent-favoring residues (explicitly excluding Pro/Cys/Gly below)
+# Polar/charged/solvent-favoring residues (excluding Pro/Cys/Gly below).
+# Pro/Cys/Gly are exceptions – they have unique structural implications.
 POLAR_CLASSIFY: FrozenSet[str] = frozenset({"R", "K", "D", "E", "N", "Q", "S", "T", "H"})
 
 # Special-locked residues: these keep their identity through the randomization step
@@ -214,7 +215,7 @@ ESM2_COMMON_MODELS: FrozenSet[str] = frozenset(
 # ----------------------------
 
 def is_valid_protein_sequence(seq: str, *, allow_gaps: bool = False, allow_stop: bool = False) -> bool:
-    """Return True iff `seq` contains only characters allowed by this workflow."""
+    """Return True if `seq` contains only characters allowed by this workflow."""
     allowed = set(AA_EXTENDED)
     if allow_gaps:
         allowed |= set(GAP_CHARS)

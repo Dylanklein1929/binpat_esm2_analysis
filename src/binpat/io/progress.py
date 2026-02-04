@@ -10,7 +10,7 @@ class Progress:
     label: str
     width: int = 28
     every: int = 1          # update every N items
-    stream = sys.stderr     # stderr is nice for logs
+    stream = sys.stderr     # stderr -> good for logs
     start_t: float = time.time()
     last_print_t: float = 0.0
     min_interval_s: float = 0.2  # avoid spamming logs

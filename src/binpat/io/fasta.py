@@ -91,13 +91,13 @@ def iter_fasta_records(fasta_path: PathLike) -> Iterator[FastaRecord]:
     seq_chunks: List[str] = []
 
     with path.open("r") as f:
-        for raw in f:
-            line = raw.strip()
+        for row in f:
+            line = row.strip()
             if not line:
                 continue
             if line.startswith(">"):
                 # flush previous record
-                if current_id is not None:
+                if current_id is not None:  # check if current id is filled by previous record's
                     seq = "".join(seq_chunks).replace(" ", "").upper()
                     yield FastaRecord(id=current_id, seq=seq, description=current_desc)
                 # start new record

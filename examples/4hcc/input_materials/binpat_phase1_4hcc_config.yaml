@@ -1,0 +1,12 @@
+randomization:
+  num_variants_per_input: 100
+  seed: 42
+  preserve_special_locked: true
+
+replacement_pools:
+  hydrophobic: [A, V, L, I, M, F, Y]
+  polar:       [R, K, D, E, Q, N, H]
+
+outputs:
+  variants_fasta_name: "binpat_phase1_4hcc_variants.fasta"
+  metadata_table_name: "binpat_phase1_4hcc_metadata.csv"

@@ -97,7 +97,7 @@ def iter_fasta_records(fasta_path: PathLike) -> Iterator[FastaRecord]:
                 continue
             if line.startswith(">"):
                 # flush previous record
-                if current_id is not None:  # check if current id is filled by previous record's
+                if current_id is not None: # check if current_id is filled from previous record's
                     seq = "".join(seq_chunks).replace(" ", "").upper()
                     yield FastaRecord(id=current_id, seq=seq, description=current_desc)
                 # start new record
@@ -159,7 +159,7 @@ def validate_sequence_chars(
     if not allow_stop:
         allowed.discard("*")
 
-    bad = sorted({c for c in s if c not in allowed})
+    bad = sorted({c for c in s if c not in allowed}) # these are the bad ones
     if bad:
         raise ValueError(f"Invalid FASTA characters: {bad}")
 
@@ -192,7 +192,7 @@ def assert_is_hp_token_pattern(
 
     Notes
     -----
-    - We allow lowercase by default because convention uses lowercase for p/c/g.
+    - Allow lowercase by default because convention uses lowercase for p/c/g.
     - If allow_lowercase=True, uppercase P/C/G in token patterns will be rejected (on purpose)
       to avoid confusing token patterns with AA sequences.
     """

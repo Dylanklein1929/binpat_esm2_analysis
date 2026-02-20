@@ -86,4 +86,17 @@ pip install -e ".[gpu]" --only-binary=:all:
 ```bash
 python scripts/phase2/00_preflight.py  
 ```
-(this reports versions/availability for python, pytorch, cuda, gpu device)  
+(this reports versions/availability for python, pytorch, cuda, gpu device) 
+
+
+# Recapitulating four-helix bundle/coiled-coil design rules
+For executing the analysis reported on in this manuscript, refer to the scripts in 
+```bash
+/scripts/slurm
+``` 
+and the config and fasta in
+```bash
+/examples/4hcc/input_materials
+```
+
+**any/all feedback is appreciated**

@@ -32,7 +32,7 @@ OVERWRITE="0"                 # 1 to pass --overwrite
 IDS_FILE=""                   # optional: path to ids file; leave blank to infer from NPZ dir
 LIMIT=""                      # optional: integer
 
-# --- Derived paths (match defaults in your script) ---
+# --- Derived paths (change if necessary) ---
 PCA_MODEL="$OUTDIR/phase2/pca/pca_model.joblib"
 PDB_DIR="$OUTDIR/pdbs"
 EMB_DIR="$OUTDIR/phase2/embeddings"

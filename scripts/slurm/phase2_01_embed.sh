@@ -33,7 +33,7 @@ module use /projects/community/modulefiles
 module load miniconda
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
-# Activate your ESM2-ready conda env (you create this once; see note below)
+# Activate ESM2-ready conda env
 conda activate binpat || { echo "[ERROR] conda env 'binpat' not found"; exit 2; }
 
 python -V
@@ -52,7 +52,7 @@ export TOKENIZERS_PARALLELISM=false
 mkdir -p "$XDG_CACHE_HOME" "$TORCH_HOME" "$HF_HOME"
 # ---------------- Run ----------------
 
-# Ensure editable install exists (recommended)
+# Ensure editable install exists
 python -c "import binpat; print('binpat import OK')"
 
 GPU_FLAG="--device cuda"

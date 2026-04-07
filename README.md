@@ -35,7 +35,7 @@ conda activate binpat
 ```
 2. clone repo and install dependencies  
 ```bash
-git clone https://github.com/DylanKlein1929/binpat_esm2_analysis.git
+git clone https://github.com/Dylanklein1929/binpat_esm2_analysis.git
 cd binpat_esm2_analysis
 pip install -e . --only-binary=:all:
 ```  

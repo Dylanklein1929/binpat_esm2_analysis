@@ -251,6 +251,7 @@ def compute_metrics_batch(
                .replace("_loops_", "|loops|")
                .replace("_patterns_", "|patterns|")
         )
+        print(f'path: {p}\nvid: {vid}\nfasta_vid: {fasta_vid}\n\n")
         try:
             rows.append(compute_metrics_for_pdb(p, spec=spec, variant_id=fasta_vid))
         except Exception as e:

@@ -247,15 +247,15 @@ def compute_metrics_batch(
         vid = structure_id_from_path(p)
         fasta_vid = (
             vid.replace("-", ",")
-            vid.replace("_helices_", "|helices|")
-            vid.replace("_loops_", "|loops|")
-            vid.replace("_patterns_", "|patterns|")
+               .replace("_helices_", "|helices|")
+               .replace("_loops_", "|loops|")
+               .replace("_patterns_", "|patterns|")
         )
         try:
-            rows.append(compute_metrics_for_pdb(p, spec=spec, variant_id=vid))
+            rows.append(compute_metrics_for_pdb(p, spec=spec, variant_id=fasta_vid))
         except Exception as e:
             skipped.append(SkippedStructure(
-                variant_id=vid,
+                variant_id=fasta_vid,
                 pdb_path=str(p),
                 reason=f"{type(e).__name__}: {e}",
             ))

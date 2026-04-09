@@ -244,15 +244,8 @@ def predict_many(
     results: List[PredictionResult] = []
     num = 0
     for vid, seq in sequences.items():
-        safe_vid = (
-            vid.replace("|", "_")
-               .replace("/", "_")
-               .replace(" ", "_")
-               .replace(",", "-")
-               .replace("=", "_")
-        )
-
-        out_pdb = out_dir / f"{safe_vid}.pdb"
+        
+        out_pdb = out_dir / f"{vid}.pdb"
 
         results.append(
             predict_one(

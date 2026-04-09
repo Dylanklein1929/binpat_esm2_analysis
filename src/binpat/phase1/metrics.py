@@ -250,6 +250,7 @@ def compute_metrics_batch(
             vid.replace("_helices_", "|helices|")
             vid.replace("_loops_", "|loops|")
             vid.replace("_patterns_", "|patterns|")
+        )
         try:
             rows.append(compute_metrics_for_pdb(p, spec=spec, variant_id=vid))
         except Exception as e:

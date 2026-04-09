@@ -31,6 +31,7 @@ Supported platforms:
 1. create and activate a conda environment (python≥3.9 recommended)
 ```bash
 conda create -n binpat python=3.10 -y
+conda install -c salilab dssp
 conda activate binpat
 ```
 2. clone repo and install dependencies  

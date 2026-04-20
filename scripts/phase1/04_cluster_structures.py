@@ -117,7 +117,7 @@ def main() -> None:
             max_clusters=int(args.max_clusters),
         )
 
-        # --- Compute + cluster inside try/except (helps for reporting failures cleanly) ---
+        # --- Compute + cluster inside try/except (for reporting failures cleanly) ---
         try:
             ids, rmsd_mat = compute_rmsd_matrix(pdb_paths, atom_name=spec.atom_name)
             Z = compute_linkage_from_rmsd(rmsd_mat, method=spec.linkage_method)

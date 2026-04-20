@@ -108,6 +108,8 @@ def main() -> None:
                 )
             continue
 
+        # remove structures with criss-crossing glycine loops
+        
         spec = RMSDClusterSpec(
             atom_name=args.atom_name,
             linkage_method=args.linkage,

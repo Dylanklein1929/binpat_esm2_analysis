@@ -109,6 +109,7 @@ def main() -> None:
             continue
 
         # remove structures with criss-crossing glycine loops
+        #valid_pdb_paths, metrics_by_id = filter_structs_by_centroid_connectivity(pdb_paths,
         
         spec = RMSDClusterSpec(
             atom_name=args.atom_name,

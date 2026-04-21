@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -91,7 +91,7 @@ def main() -> None:
             else:
                 missing.append(vid)
 
-        # require at least 2 structures to cluster
+        # require at least 2 structures to cluster before filtering
         if len(pdb_paths) < 2:
             for vid in variant_ids:
                 rows_all.append(
@@ -108,9 +108,44 @@ def main() -> None:
                 )
             continue
 
-        # remove structures with criss-crossing glycine loops
-        #valid_pdb_paths, metrics_by_id = filter_structs_by_centroid_connectivity(pdb_paths,
-        
+        # remove structures with bad loop-connectivity topology
+        # using the shortest-helix-compatible residue windows across templates
+        original_pdb_paths = dict(pdb_paths)
+        helix_ranges: List[Tuple[int, int]] = [(7, 11), (7, 11), (7, 11), (7, 11)]
+
+        valid_pdb_paths, metrics_by_id = filter_structs_by_centroid_connectivity(
+            pdb_paths=original_pdb_paths,
+            helix_ranges=helix_ranges,
+            abs_cosine_threshold=0.6,
+        )
+
+        filtered_out = set(original_pdb_paths) - set(valid_pdb_paths)
+        pdb_paths = valid_pdb_paths
+
+        # require at least 2 structures to cluster after filtering too
+        if len(pdb_paths) < 2:
+            for vid in variant_ids:
+                if vid in missing:
+                    note = "missing_pdb"
+                elif vid in filtered_out:
+                    note = "filtered_bad_topology"
+                else:
+                    note = "too_few_structures_after_filtering"
+
+                rows_all.append(
+                    {
+                        "template_id": template_id,
+                        "variant_id": vid,
+                        "cluster_id": None,
+                        "is_medoid": None,
+                        "cutoff": None,
+                        "silhouette": None,
+                        "n_clusters": None,
+                        "note": note,
+                    }
+                )
+            continue
+
         spec = RMSDClusterSpec(
             atom_name=args.atom_name,
             linkage_method=args.linkage,
@@ -168,7 +203,7 @@ def main() -> None:
                         "template_id": template_id,
                         "variant_id": vid,
                         "cluster_id": int(lab),
-                        "is_medoid": (vid == medoids[int(lab)]), # later used as reference structure for computing average structure
+                        "is_medoid": (vid == medoids[int(lab)]),
                         "cutoff": cutoff,
                         "silhouette": sil,
                         "n_clusters": n_clusters,
@@ -185,28 +220,29 @@ def main() -> None:
             pd.DataFrame(medoid_rows).to_csv(tdir / "cluster_medoids.csv", index=False)
 
             # Summary text
-            (tdir / "cluster_summary.txt").write_text(
-                "\n".join(
-                    [
-                        f"template_id: {template_id}",
-                        f"n_structures: {len(ids)}",
-                        f"linkage: {spec.linkage_method}",
-                        f"atom_name: {spec.atom_name}",
-                        f"cutoff: {cutoff}",
-                        f"n_clusters: {n_clusters}",
-                        f"silhouette: {sil}",
-                        "",
-                        "missing_pdbs:",
-                        *([f"  - {m}" for m in missing] if missing else ["  (none)"]),
-                        "",
-                    ]
-                )
-            )
+            summary_lines = [
+                f"template_id: {template_id}",
+                f"n_structures: {len(ids)}",
+                f"linkage: {spec.linkage_method}",
+                f"atom_name: {spec.atom_name}",
+                f"cutoff: {cutoff}",
+                f"n_clusters: {n_clusters}",
+                f"silhouette: {sil}",
+                f"n_filtered_bad_topology: {len(filtered_out)}",
+                "",
+                "missing_pdbs:",
+                *([f"  - {m}" for m in missing] if missing else ["  (none)"]),
+                "",
+                "filtered_bad_topology:",
+                *([f"  - {vid}" for vid in sorted(filtered_out)] if filtered_out else ["  (none)"]),
+                "",
+            ]
+            (tdir / "cluster_summary.txt").write_text("\n".join(summary_lines))
 
             rows_all.extend(per_rows)
             medoids_all.extend(medoid_rows)
 
-            # Also record missing PDBs as rows in global CSV (so nothing is silently dropped)
+            # Record missing PDBs as rows in global CSV
             for vid in missing:
                 rows_all.append(
                     {
@@ -218,6 +254,21 @@ def main() -> None:
                         "silhouette": sil,
                         "n_clusters": n_clusters,
                         "note": "missing_pdb",
+                    }
+                )
+
+            # Record filtered-out structures as rows in global CSV
+            for vid in sorted(filtered_out):
+                rows_all.append(
+                    {
+                        "template_id": template_id,
+                        "variant_id": vid,
+                        "cluster_id": None,
+                        "is_medoid": None,
+                        "cutoff": cutoff,
+                        "silhouette": sil,
+                        "n_clusters": n_clusters,
+                        "note": "filtered_bad_topology",
                     }
                 )
 

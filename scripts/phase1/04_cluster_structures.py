@@ -5,24 +5,10 @@
 Phase 1, Step 04:
 - Cluster predicted structures by CA RMSD (hierarchical clustering) per template_id.
 
-Writes:
-- outdir/cluster_assignments.csv
-- outdir/cluster_medoids.csv
-- outdir/clusters/<template_id>/cluster_assignments.csv
-- outdir/clusters/<template_id>/cluster_medoids.csv
-- outdir/clusters/<template_id>/cluster_summary.txt
-- outdir/clusters/<template_id>/dendrogram.(png|pdf|svg)  [optional]
-
-Notes:
-- O(N^2) RMSD computation per template_id (pairwise RMSD matrix). Could improve this later with caching.
-
-Example:
-python 04_cluster_structures.py \
-    --outdir outdir/ \
-    --variants-metadata variants_metadata.csv \
-    --linkage single \
-    ==dendrogram
-
+Behavior:
+- Uses structural_metrics_per_structure.csv from Step 03
+- Applies centroid-based topology filtering ONLY among structures that pass
+  the hydrophobic rASA threshold
 """
 
 from __future__ import annotations
@@ -43,7 +29,11 @@ from binpat.phase1.rmsd_clustering import (
     compute_cluster_medoids,
     compute_linkage_from_rmsd,
     compute_rmsd_matrix,
+    filter_structs_by_centroid_connectivity_among_rasa_passers,
 )
+
+CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(7, 11), (7, 11), (7, 11), (7, 11)]
+CENTROID_ABS_COSINE_THRESHOLD: float = 0.6
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +41,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--outdir", required=True, type=str)
     p.add_argument("--variants-metadata", required=True, type=str, help="variants_metadata.csv from Step 01")
     p.add_argument("--pdb-dir", type=str, default=None, help="Default: <outdir>/pdbs")
+    p.add_argument(
+        "--metrics-csv",
+        type=str,
+        default=None,
+        help="Default: <outdir>/structural_metrics_per_structure.csv",
+    )
+    p.add_argument(
+        "--rasa-threshold",
+        type=float,
+        default=0.25,
+        help="Hydrophobic rASA threshold; topology filtering is only applied among passers.",
+    )
 
     p.add_argument("--atom-name", type=str, default="CA")
     p.add_argument("--linkage", type=str, default="single", choices=["single", "complete", "average"])
@@ -69,6 +71,23 @@ def main() -> None:
     args = parse_args()
     outdir = Path(args.outdir)
     pdb_dir = Path(args.pdb_dir) if args.pdb_dir else (outdir / "pdbs")
+    metrics_csv = Path(args.metrics_csv) if args.metrics_csv else (outdir / "structural_metrics_per_structure.csv")
+
+    if not metrics_csv.exists():
+        raise FileNotFoundError(
+            f"Metrics CSV not found: {metrics_csv}. Run 03_compute_structural_metrics.py first."
+        )
+
+    metrics_df = pd.read_csv(metrics_csv)
+    if "variant_id" not in metrics_df.columns or "mean_hydrophobic_rasa" not in metrics_df.columns:
+        raise ValueError(
+            f"Metrics CSV must contain 'variant_id' and 'mean_hydrophobic_rasa'. Found: {list(metrics_df.columns)}"
+        )
+
+    rasa_by_id: Dict[str, float] = {}
+    for _, row in metrics_df.iterrows():
+        vid = str(row["variant_id"])
+        rasa_by_id[vid] = float(row["mean_hydrophobic_rasa"]) if pd.notna(row["mean_hydrophobic_rasa"]) else float("inf")
 
     meta = pd.read_csv(args.variants_metadata)
     if "variant_id" not in meta.columns or "template_id" not in meta.columns:
@@ -91,7 +110,6 @@ def main() -> None:
             else:
                 missing.append(vid)
 
-        # require at least 2 structures to cluster before filtering
         if len(pdb_paths) < 2:
             for vid in variant_ids:
                 rows_all.append(
@@ -108,27 +126,25 @@ def main() -> None:
                 )
             continue
 
-        # remove structures with bad loop-connectivity topology
-        # using the shortest-helix-compatible residue windows across templates
         original_pdb_paths = dict(pdb_paths)
-        helix_ranges: List[Tuple[int, int]] = [(7, 11), (7, 11), (7, 11), (7, 11)]
-
-        valid_pdb_paths, metrics_by_id = filter_structs_by_centroid_connectivity(
+        valid_pdb_paths, topology_results_by_id = filter_structs_by_centroid_connectivity_among_rasa_passers(
             pdb_paths=original_pdb_paths,
-            helix_ranges=helix_ranges,
-            abs_cosine_threshold=0.6,
+            rasa_by_id=rasa_by_id,
+            rasa_threshold=float(args.rasa_threshold),
+            helix_ranges=CENTROID_HELIX_RANGES,
+            chain_id=None,
+            abs_cosine_threshold=CENTROID_ABS_COSINE_THRESHOLD,
         )
 
         filtered_out = set(original_pdb_paths) - set(valid_pdb_paths)
         pdb_paths = valid_pdb_paths
 
-        # require at least 2 structures to cluster after filtering too
         if len(pdb_paths) < 2:
             for vid in variant_ids:
                 if vid in missing:
                     note = "missing_pdb"
                 elif vid in filtered_out:
-                    note = "filtered_bad_topology"
+                    note = "filtered_bad_topology_among_rasa_passers"
                 else:
                     note = "too_few_structures_after_filtering"
 
@@ -155,7 +171,6 @@ def main() -> None:
             max_clusters=int(args.max_clusters),
         )
 
-        # --- Compute + cluster inside try/except (for reporting failures cleanly) ---
         try:
             ids, rmsd_mat = compute_rmsd_matrix(pdb_paths, atom_name=spec.atom_name)
             Z = compute_linkage_from_rmsd(rmsd_mat, method=spec.linkage_method)
@@ -181,13 +196,11 @@ def main() -> None:
                 )
 
             n_clusters = len(set(labels))
-            medoids = compute_cluster_medoids(ids, rmsd_mat, labels)  # cluster_id -> variant_id
+            medoids = compute_cluster_medoids(ids, rmsd_mat, labels)
 
-            # per-template output dir
             tdir = outdir / "clusters" / str(template_id)
             tdir.mkdir(parents=True, exist_ok=True)
 
-            # optional dendrogram
             if args.dendrogram:
                 fig = plt.figure()
                 dendrogram(Z, labels=ids, orientation="top")
@@ -195,7 +208,6 @@ def main() -> None:
                 fig.savefig(tdir / f"dendrogram.{args.dendrogram_format}", dpi=300)
                 plt.close(fig)
 
-            # Write per-structure assignments
             per_rows: List[dict] = []
             for vid, lab in zip(ids, labels):
                 per_rows.append(
@@ -212,14 +224,13 @@ def main() -> None:
                 )
             pd.DataFrame(per_rows).to_csv(tdir / "cluster_assignments.csv", index=False)
 
-            # Write per-template medoids table
             medoid_rows = [
                 {"template_id": template_id, "cluster_id": int(cid), "medoid_variant_id": mid}
                 for cid, mid in sorted(medoids.items(), key=lambda x: int(x[0]))
             ]
             pd.DataFrame(medoid_rows).to_csv(tdir / "cluster_medoids.csv", index=False)
 
-            # Summary text
+            checked_ids = [vid for vid, rec in topology_results_by_id.items() if rec["topology_checked"]]
             summary_lines = [
                 f"template_id: {template_id}",
                 f"n_structures: {len(ids)}",
@@ -228,12 +239,13 @@ def main() -> None:
                 f"cutoff: {cutoff}",
                 f"n_clusters: {n_clusters}",
                 f"silhouette: {sil}",
+                f"n_topology_checked_among_rasa_passers: {len(checked_ids)}",
                 f"n_filtered_bad_topology: {len(filtered_out)}",
                 "",
                 "missing_pdbs:",
                 *([f"  - {m}" for m in missing] if missing else ["  (none)"]),
                 "",
-                "filtered_bad_topology:",
+                "filtered_bad_topology_among_rasa_passers:",
                 *([f"  - {vid}" for vid in sorted(filtered_out)] if filtered_out else ["  (none)"]),
                 "",
             ]
@@ -242,7 +254,6 @@ def main() -> None:
             rows_all.extend(per_rows)
             medoids_all.extend(medoid_rows)
 
-            # Record missing PDBs as rows in global CSV
             for vid in missing:
                 rows_all.append(
                     {
@@ -257,7 +268,6 @@ def main() -> None:
                     }
                 )
 
-            # Record filtered-out structures as rows in global CSV
             for vid in sorted(filtered_out):
                 rows_all.append(
                     {
@@ -268,12 +278,11 @@ def main() -> None:
                         "cutoff": cutoff,
                         "silhouette": sil,
                         "n_clusters": n_clusters,
-                        "note": "filtered_bad_topology",
+                        "note": "filtered_bad_topology_among_rasa_passers",
                     }
                 )
 
         except Exception as e:
-            # record failure for this template
             for vid in variant_ids:
                 rows_all.append(
                     {
@@ -289,7 +298,6 @@ def main() -> None:
                 )
             continue
 
-    # global outputs
     out_assign = outdir / "cluster_assignments.csv"
     pd.DataFrame(rows_all).to_csv(out_assign, index=False)
 

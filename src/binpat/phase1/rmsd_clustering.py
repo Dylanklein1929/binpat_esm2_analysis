@@ -38,7 +38,7 @@ class ClusterResult:
     silhouette: Optional[float]    # None if undefined
     n_clusters: int
 
-############# for treating glycine loops as poly-line objects, to test for bad/criss-cross formations ###########
+############# test for bad/criss-cross formations (option 1): treat glycine loops as poly-line objects ##################
 def _segment_segment_distance(
     p0: np.ndarray,
     p1: np.ndarray,
@@ -290,7 +290,295 @@ def remove_structs_with_criss_crossing_loops(
             valid_pdb_paths[vid] = path
 
     return valid_pdb_paths
-################################# end of criss-cross check utils ###############################################################
+    
+###########################################################################################################################
+# check for bad/criss-cross formations (option 2): compute absolute cosine similarity between helix12 and helix34 vectors #
+###########################################################################################################################
+def _get_ca_coords_for_residue_range(
+    chain,
+    start_resseq: int,
+    end_resseq: int,
+) -> np.ndarray:
+    """
+    Collect CA coordinates for residues in the inclusive PDB residue-number range
+    [start_resseq, end_resseq].
+
+    Notes:
+        - Only standard residues with CA atoms are included.
+        - Residue numbering is assumed to use PDB residue sequence numbers
+          (res.id[1]).
+        - Insertion codes are ignored.
+
+    Args:
+        chain:
+            Bio.PDB Chain object
+        start_resseq:
+            Starting residue number (inclusive)
+        end_resseq:
+            Ending residue number (inclusive)
+
+    Returns:
+        coords:
+            Array of shape (N, 3)
+
+    Raises:
+        ValueError if no CA atoms are found in the requested range.
+    """
+    coords: List[np.ndarray] = []
+
+    for res in chain.get_residues():
+        hetflag, resseq, icode = res.id
+        if hetflag != " ":
+            continue
+        if start_resseq <= resseq <= end_resseq and res.has_id("CA"):
+            coords.append(res["CA"].get_coord().astype(float))
+
+    if not coords:
+        raise ValueError(
+            f"No CA atoms found in residue range {start_resseq}-{end_resseq}."
+        )
+
+    return np.asarray(coords, dtype=float)
+
+
+def _centroid(coords: np.ndarray) -> np.ndarray:
+    """
+    Compute centroid of an (N,3) coordinate array.
+    """
+    if coords.ndim != 2 or coords.shape[1] != 3 or coords.shape[0] == 0:
+        raise ValueError(f"Expected coords with shape (N,3), got {coords.shape}")
+    return coords.mean(axis=0)
+
+
+def _vector_between_centroids(
+    chain,
+    helix_a: Tuple[int, int],
+    helix_b: Tuple[int, int],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute the directed vector from centroid(helix_a) to centroid(helix_b).
+
+    Args:
+        chain:
+            Bio.PDB Chain object
+        helix_a:
+            (start_resseq, end_resseq) for helix A
+        helix_b:
+            (start_resseq, end_resseq) for helix B
+
+    Returns:
+        centroid_a, centroid_b, vector_b_minus_a
+    """
+    coords_a = _get_ca_coords_for_residue_range(chain, helix_a[0], helix_a[1])
+    coords_b = _get_ca_coords_for_residue_range(chain, helix_b[0], helix_b[1])
+
+    cen_a = _centroid(coords_a)
+    cen_b = _centroid(coords_b)
+    vec = cen_b - cen_a
+    return cen_a, cen_b, vec
+
+
+def _safe_norm(v: np.ndarray, eps: float = 1e-12) -> float:
+    """
+    Compute vector norm and guard against zero-length vectors.
+    """
+    n = float(np.linalg.norm(v))
+    if n < eps:
+        raise ValueError("Encountered near-zero-length vector.")
+    return n
+
+
+def _cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
+    """
+    Standard cosine similarity in [-1, 1].
+    """
+    n1 = _safe_norm(v1)
+    n2 = _safe_norm(v2)
+    return float(np.dot(v1, v2) / (n1 * n2))
+
+
+def _absolute_cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
+    """
+    Absolute cosine similarity in [0, 1].
+
+    Interpretation:
+        1.0 -> parallel or anti-parallel
+        0.0 -> orthogonal
+    """
+    return abs(_cosine_similarity(v1, v2))
+
+
+def _angle_degrees(v1: np.ndarray, v2: np.ndarray) -> float:
+    """
+    Angle in degrees between two vectors, in [0, 180].
+    """
+    cosval = np.clip(_cosine_similarity(v1, v2), -1.0, 1.0)
+    return float(np.degrees(np.arccos(cosval)))
+
+
+def _folded_angle_degrees(v1: np.ndarray, v2: np.ndarray) -> float:
+    """
+    Angle between two vectors folded into [0, 90].
+
+    Parallel and anti-parallel both map near 0 degrees.
+    Orthogonal maps to 90 degrees.
+
+    Useful when anti-parallel is considered equivalent to parallel for topology.
+    """
+    angle = _angle_degrees(v1, v2)
+    return min(angle, 180.0 - angle)
+
+
+def compute_bundle_connectivity_metric(
+    pdb_path: Path,
+    helix_ranges: List[Tuple[int, int]],
+    chain_id: Optional[str] = None,
+) -> Dict[str, np.ndarray | float]:
+    """
+    Compute the centroid-vector alignment metric for a four-helix bundle.
+
+    Specifically computes:
+        v12 = centroid(helix1) -> centroid(helix2)
+        v34 = centroid(helix3) -> centroid(helix4)
+
+    and returns their cosine-based relationships.
+
+    Args:
+        pdb_path:
+            Path to PDB file
+        helix_ranges:
+            List of four (start_resseq, end_resseq) tuples, in helix order:
+            [helix1, helix2, helix3, helix4]
+        chain_id:
+            Optional chain ID. If None, uses the first chain in the first model.
+
+    Returns:
+        dict with:
+            centroid1, centroid2, centroid3, centroid4 : np.ndarray shape (3,)
+            v12, v34 : np.ndarray shape (3,)
+            cosine_similarity : float in [-1,1]
+            abs_cosine_similarity : float in [0,1]
+            angle_degrees : float in [0,180]
+            folded_angle_degrees : float in [0,90]
+    """
+    if len(helix_ranges) != 4:
+        raise ValueError("helix_ranges must contain exactly four helix ranges.")
+
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("bundle", str(pdb_path))
+    model = next(structure.get_models())
+
+    if chain_id is None:
+        chain = next(model.get_chains())
+    else:
+        chain = model[chain_id]
+
+    h1, h2, h3, h4 = helix_ranges
+
+    c1, c2, v12 = _vector_between_centroids(chain, h1, h2)
+    c3, c4, v34 = _vector_between_centroids(chain, h3, h4)
+
+    cos_sim = _cosine_similarity(v12, v34)
+    abs_cos_sim = abs(cos_sim)
+    angle = _angle_degrees(v12, v34)
+    folded_angle = _folded_angle_degrees(v12, v34)
+
+    return {
+        "centroid1": c1,
+        "centroid2": c2,
+        "centroid3": c3,
+        "centroid4": c4,
+        "v12": v12,
+        "v34": v34,
+        "cosine_similarity": cos_sim,
+        "abs_cosine_similarity": abs_cos_sim,
+        "angle_degrees": angle,
+        "folded_angle_degrees": folded_angle,
+    }
+
+
+def is_bad_criss_cross_topology_from_centroids(
+    pdb_path: Path,
+    helix_ranges: List[Tuple[int, int]],
+    chain_id: Optional[str] = None,
+    abs_cosine_threshold: float = 0.5,
+) -> Tuple[bool, Dict[str, np.ndarray | float]]:
+    """
+    Classify a structure as bad if the helix-centroid connectivity vectors are
+    insufficiently parallel.
+
+    Args:
+        pdb_path:
+            Path to PDB file
+        helix_ranges:
+            [(h1_start, h1_end), (h2_start, h2_end), (h3_start, h3_end), (h4_start, h4_end)]
+        chain_id:
+            Optional chain ID
+        abs_cosine_threshold:
+            Structures with abs(cosine(v12, v34)) below this are flagged as bad.
+
+            Example interpretation:
+                0.9  -> very strict; requires strong parallelism
+                0.7  -> moderate
+                0.5  -> fairly permissive
+                0.0  -> everything passes
+
+    Returns:
+        (is_bad, metrics_dict)
+    """
+    metrics = compute_bundle_connectivity_metric(
+        pdb_path=pdb_path,
+        helix_ranges=helix_ranges,
+        chain_id=chain_id,
+    )
+
+    is_bad = metrics["abs_cosine_similarity"] < abs_cosine_threshold
+    return bool(is_bad), metrics
+
+
+def filter_structs_by_centroid_connectivity(
+    pdb_paths: Dict[str, Path],
+    helix_ranges: List[Tuple[int, int]],
+    chain_id: Optional[str] = None,
+    abs_cosine_threshold: float = 0.5,
+) -> Tuple[Dict[str, Path], Dict[str, Dict[str, np.ndarray | float]]]:
+    """
+    Filter out structures whose helix centroid connectivity looks like the
+    criss-cross topology.
+
+    Args:
+        pdb_paths:
+            Mapping structure_id -> pdb_path
+        helix_ranges:
+            List of four residue ranges, one per helix
+        chain_id:
+            Optional chain ID
+        abs_cosine_threshold:
+            Minimum allowed absolute cosine similarity between v12 and v34
+
+    Returns:
+        valid_pdb_paths:
+            Structures that pass the filter
+        metrics_by_id:
+            Per-structure metrics for inspection/logging
+    """
+    valid_pdb_paths: Dict[str, Path] = {}
+    metrics_by_id: Dict[str, Dict[str, np.ndarray | float]] = {}
+
+    for vid, path in pdb_paths.items():
+        is_bad, metrics = is_bad_criss_cross_topology_from_centroids(
+            pdb_path=path,
+            helix_ranges=helix_ranges,
+            chain_id=chain_id,
+            abs_cosine_threshold=abs_cosine_threshold,
+        )
+        metrics_by_id[vid] = metrics
+
+        if not is_bad:
+            valid_pdb_paths[vid] = path
+
+    return valid_pdb_paths, metrics_by_id
+##########################################################################################################################
 
 def _load_ca_coords(pdb_path: Path, *, structure_id: str, atom_name: str = "CA") -> np.ndarray:
     """

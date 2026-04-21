@@ -12,6 +12,7 @@ from sklearn.metrics import silhouette_score
 
 
 
+
 @dataclass(frozen=True)
 class RMSDClusterSpec:
     atom_name: str = "CA"
@@ -37,6 +38,259 @@ class ClusterResult:
     silhouette: Optional[float]    # None if undefined
     n_clusters: int
 
+############# for treating glycine loops as poly-line objects, to test for bad/criss-cross formations ###########
+def _segment_segment_distance(
+    p0: np.ndarray,
+    p1: np.ndarray,
+    q0: np.ndarray,
+    q1: np.ndarray,
+    eps: float = 1e-12,
+) -> Tuple[float, float, float]:
+    """
+    Return the minimum distance between two 3D line segments p(s)=p0+s*(p1-p0),
+    q(t)=q0+t*(q1-q0), with s,t in [0,1].
+
+    Returns:
+        distance, s_clamped, t_clamped
+    """
+    u = p1 - p0
+    v = q1 - q0
+    w0 = p0 - q0
+
+    a = np.dot(u, u)
+    b = np.dot(u, v)
+    c = np.dot(v, v)
+    d = np.dot(u, w0)
+    e = np.dot(v, w0)
+
+    denom = a * c - b * b
+
+    # Default parameters
+    s = 0.0
+    t = 0.0
+
+    if a < eps and c < eps:
+        # both segments are effectively points
+        return float(np.linalg.norm(p0 - q0)), 0.0, 0.0
+    elif a < eps:
+        # first segment is effectively a point
+        t = np.clip(e / c, 0.0, 1.0) if c > eps else 0.0
+        closest_p = p0
+        closest_q = q0 + t * v
+        return float(np.linalg.norm(closest_p - closest_q)), 0.0, float(t)
+    elif c < eps:
+        # second segment is effectively a point
+        s = np.clip(-d / a, 0.0, 1.0) if a > eps else 0.0
+        closest_p = p0 + s * u
+        closest_q = q0
+        return float(np.linalg.norm(closest_p - closest_q)), float(s), 0.0
+
+    if abs(denom) > eps:
+        s = (b * e - c * d) / denom
+        t = (a * e - b * d) / denom
+    else:
+        # nearly parallel
+        s = 0.0
+        t = e / c if c > eps else 0.0
+
+    s = np.clip(s, 0.0, 1.0)
+    t = np.clip(t, 0.0, 1.0)
+
+    # Recompute after clamping
+    closest_p = p0 + s * u
+    closest_q = q0 + t * v
+
+    # One more refinement pass after clamping
+    # This helps when the unconstrained solution lies outside [0,1]
+    if abs(denom) > eps:
+        if s in (0.0, 1.0):
+            t = np.clip((b * s + e) / c, 0.0, 1.0)
+            closest_p = p0 + s * u
+            closest_q = q0 + t * v
+        if t in (0.0, 1.0):
+            s = np.clip((b * t - d) / a, 0.0, 1.0)
+            closest_p = p0 + s * u
+            closest_q = q0 + t * v
+
+    dist = np.linalg.norm(closest_p - closest_q)
+    return float(dist), float(s), float(t)
+
+
+def _segment_angle_cosine(
+    p0: np.ndarray,
+    p1: np.ndarray,
+    q0: np.ndarray,
+    q1: np.ndarray,
+    eps: float = 1e-12,
+) -> float:
+    """
+    Return |cos(theta)| between segment direction vectors.
+    Smaller means more perpendicular; larger means more parallel.
+    """
+    u = p1 - p0
+    v = q1 - q0
+    nu = np.linalg.norm(u)
+    nv = np.linalg.norm(v)
+    if nu < eps or nv < eps:
+        return 1.0
+    return float(abs(np.dot(u, v) / (nu * nv)))
+
+
+def _extract_gly_loops_from_model(model, expected_loop_len: int = 6) -> List[List[np.ndarray]]:
+    """
+    Extract consecutive GLY runs of exactly expected_loop_len residues.
+    Uses CA coordinates only.
+
+    Returns:
+        A list of loops, where each loop is a list of CA coordinate arrays.
+    """
+    loops: List[List[np.ndarray]] = []
+
+    for chain in model:
+        current_run: List[np.ndarray] = []
+
+        for res in chain.get_residues():
+            # Ignore hetero residues / waters
+            hetflag = res.id[0]
+            if hetflag != " ":
+                if len(current_run) == expected_loop_len:
+                    loops.append(current_run)
+                current_run = []
+                continue
+
+            if res.get_resname() == "GLY" and res.has_id("CA"):
+                current_run.append(res["CA"].get_coord().astype(float))
+            else:
+                if len(current_run) == expected_loop_len:
+                    loops.append(current_run)
+                current_run = []
+
+        # flush end of chain
+        if len(current_run) == expected_loop_len:
+            loops.append(current_run)
+
+    return loops
+
+
+def _loops_criss_cross(
+    loop1: List[np.ndarray],
+    loop2: List[np.ndarray],
+    distance_cutoff: float = 4.5,
+    parallel_cosine_cutoff: float = 0.85,
+    require_interior: bool = True,
+) -> bool:
+    """
+    Decide whether two glycine loops have a 'bad criss-cross' geometry.
+
+    Strategy:
+      - Represent each loop as a polyline through CA atoms.
+      - Compare every segment pair between the two loops.
+      - Flag as bad if:
+            * segment-segment minimum distance <= distance_cutoff
+            * segments are not too parallel
+            * optionally, closest points lie in the interiors of both segments
+
+    Args:
+        loop1, loop2:
+            Lists of CA coordinates for the two loops
+        distance_cutoff:
+            Max 3D distance (Å) to consider suspicious
+        parallel_cosine_cutoff:
+            If |cos(theta)| is above this, segments are treated as too parallel
+        require_interior:
+            If True, only count close approaches where the closest points lie
+            away from segment endpoints
+
+    Returns:
+        True if the loops appear to criss-cross badly, else False.
+    """
+    for i in range(len(loop1) - 1):
+        p0 = loop1[i]
+        p1 = loop1[i + 1]
+
+        for j in range(len(loop2) - 1):
+            q0 = loop2[j]
+            q1 = loop2[j + 1]
+
+            dist, s, t = _segment_segment_distance(p0, p1, q0, q1)
+            if dist > distance_cutoff:
+                continue
+
+            cosang = _segment_angle_cosine(p0, p1, q0, q1)
+            if cosang > parallel_cosine_cutoff:
+                continue
+
+            if require_interior:
+                # Exclude cases where the closest approach happens at segment tips
+                if not (0.05 < s < 0.95 and 0.05 < t < 0.95):
+                    continue
+
+            return True
+
+    return False
+
+
+def remove_structs_with_criss_crossing_loops(
+    pdb_paths: Dict[str, Path],
+    expected_loop_len: int = 6,
+    distance_cutoff: float = 4.5,
+    parallel_cosine_cutoff: float = 0.85,
+    require_interior: bool = True,
+) -> Dict[str, Path]:
+    """
+    Omit pdb structures with bad loop formations (criss-crossing glycine loops).
+
+    Args:
+        pdb_paths:
+            Mapping structure_id -> pdb_path
+        expected_loop_len:
+            Number of consecutive glycines expected per loop
+        distance_cutoff:
+            Maximum segment-segment distance (Å) for suspicious proximity
+        parallel_cosine_cutoff:
+            Segments with |cos(theta)| above this are considered too parallel
+            to count as a criss-cross
+        require_interior:
+            If True, closest approach must occur away from segment endpoints
+
+    Returns:
+        valid_pdb_paths:
+            Dict[str, Path] of structures that pass the filter
+    """
+    parser = PDBParser(QUIET=True)
+    valid_pdb_paths: Dict[str, Path] = {}
+
+    for vid, path in pdb_paths.items():
+        structure = parser.get_structure(vid, str(path))
+        model = next(structure.get_models())
+
+        loops = _extract_gly_loops_from_model(model, expected_loop_len=expected_loop_len)
+
+        # If fewer than 2 loops, nothing to compare
+        if len(loops) < 2:
+            valid_pdb_paths[vid] = path
+            continue
+
+        bad_structure = False
+        for i in range(len(loops)):
+            for j in range(i + 1, len(loops)):
+                if _loops_criss_cross(
+                    loops[i],
+                    loops[j],
+                    distance_cutoff=distance_cutoff,
+                    parallel_cosine_cutoff=parallel_cosine_cutoff,
+                    require_interior=require_interior,
+                ):
+                    bad_structure = True
+                    break
+            if bad_structure:
+                break
+
+        if not bad_structure:
+            valid_pdb_paths[vid] = path
+
+    return valid_pdb_paths
+################################# end of criss-cross check utils ###############################################################
 
 def _load_ca_coords(pdb_path: Path, *, structure_id: str, atom_name: str = "CA") -> np.ndarray:
     """

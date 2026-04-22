@@ -9,27 +9,24 @@ Phase 1, Step 03:
     (2) per-template summary CSV (grouped by template_id)
     (3) skipped structures CSV
 
-Inputs:
-- --outdir : run directory (writes outputs here)
-- --pdb-dir : directory containing predicted PDBs (default: <outdir>/pdbs)
-- --variants-metadata : Step 01 variants_metadata.csv (maps variant_id -> template_id)
-
-Notes:
-- Requires external DSSP executable `mkdssp` on PATH.
-- "avg. confidence" is mean_all_atom_bfactor reported in the PDB (raw values; no scaling).
+Topology gate behavior:
+- All structures remain included in the ordinary metric averages
+- fraction_with_rasa_below_threshold uses rasa_success_after_topology_gate
+- The centroid-based topology check is applied only to structures that already
+  satisfy the raw hydrophobic rASA threshold
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
 from binpat.io.fasta import iter_fasta_records
+from binpat.io.progress import Progress
 from binpat.phase1.metrics import (
     MetricsSpec,
     SkippedStructure,
@@ -39,7 +36,10 @@ from binpat.phase1.metrics import (
     get_residues_to_skip_from_file,
 )
 
-from binpat.io.progress import Progress
+# Shortest-helix-compatible windows, as requested
+CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(7, 11), (7, 11), (7, 11), (7, 11)]
+CENTROID_ABS_COSINE_THRESHOLD: float = 0.6
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Compute structural metrics from predicted PDBs.")
@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--rasa-threshold", type=float, default=0.25, help="Success threshold for mean hydrophobic rASA.")
     p.add_argument("--model-index", type=int, default=0, help="Model index for multi-model PDBs (default: 0).")
-    
+
     p.add_argument(
         "--residues-to-skip",
         type=str,
@@ -71,28 +71,23 @@ def parse_args() -> argparse.Namespace:
     )
 
     p.add_argument(
-    "--variants-fasta",
-    type=str,
-    default=None,
-    help="FASTA mapping variant_id -> sequence (headers must match variant_id). Required if using --skip-motif.",
+        "--variants-fasta",
+        type=str,
+        default=None,
+        help="FASTA mapping variant_id -> sequence (headers must match variant_id). Required if using --skip-motif.",
     )
 
     p.add_argument(
-    "--skip-motif",
-    action="append",
-    default=[],
-    help="Motif to omit from metrics (repeatable). Example: --skip-motif GGGGG",
+        "--skip-motif",
+        action="append",
+        default=[],
+        help="Motif to omit from metrics (repeatable). Example: --skip-motif GGGGG",
     )
 
     return p.parse_args()
 
 
 def _motif_positions_1based(seq: str, motif: str) -> Set[int]:
-    """
-    Return 1-based positions covered by ALL occurrences of motif in seq.
-    Overlapping matches allowed.
-    Example: seq=AAAAAA, motif=AAA => matches at 1-3,2-4,3-5,4-6 => returns {1..6}
-    """
     seq = seq.upper()
     motif = motif.upper()
     if not motif:
@@ -104,18 +99,13 @@ def _motif_positions_1based(seq: str, motif: str) -> Set[int]:
         i = seq.find(motif, start)
         if i == -1:
             break
-        # i is 0-based start index in python string
         for pos0 in range(i, i + len(motif)):
-            out.add(pos0 + 1)  # 1-based
-        start = i + 1  # allow overlaps
+            out.add(pos0 + 1)
+        start = i + 1
     return out
 
 
 def _load_variant_sequences(fasta_path: Optional[str]) -> Dict[str, str]:
-    """
-    Load FASTA into a dict: variant_id -> sequence.
-    Uses iter_fasta_records(), which yields FastaRecord(id, seq, description).
-    """
     if fasta_path is None:
         return {}
     seqs: Dict[str, str] = {}
@@ -128,10 +118,6 @@ def _read_variant_to_group_map(
     variants_metadata_csv: Optional[str],
     group_column: str,
 ) -> Dict[str, str]:
-    """
-    Returns mapping: variant_id -> group_column (e.g., template_id).
-    If metadata is missing, returns empty dict (caller will use fallback heuristic).
-    """
     if not variants_metadata_csv:
         return {}
 
@@ -153,10 +139,6 @@ def _read_variant_to_group_map(
 
 
 def _default_group_from_variant_id(variant_id: str) -> str:
-    """
-    Fallback grouping when metadata is not provided:
-    - seq1_var0003 -> seq1
-    """
     if "_var" in variant_id:
         return variant_id.split("_var", 1)[0]
     return variant_id
@@ -166,7 +148,6 @@ def _write_csv(path: Path, rows: List[dict], *, empty_header: Optional[List[str]
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if not rows:
-        # Write an empty file with header if provided
         if empty_header is not None:
             with path.open("w", newline="") as f:
                 w = csv.writer(f)
@@ -188,27 +169,21 @@ def _make_summary_table(
     group_col: str,
     rasa_threshold: float,
 ) -> pd.DataFrame:
-    """
-    Build a per-group summary table with columns similar to your historical output.
-
-    Output columns:
-    - <group_col> (e.g., template_id)
-    - sequence length
-    - avg. confidence                             (mean_all_atom_bfactor mean; raw PDB values)
-    - avg. helicity                               (helix_fraction mean)
-    - avg. hydrophobic rASA                       (mean_hydrophobic_rasa mean)
-    - fraction_with_rasa_below_threshold          (fraction with mean_hydrophobic_rasa <= threshold among non-missing rASA)
-    - n_structures_total
-    """
     df = per_structure_df.copy()
 
-    # success only defined when mean_hydrophobic_rasa is present
-    def to_success(x):
-        if pd.isna(x):
-            return None
-        return float(x) <= float(rasa_threshold)
-
-    df["is_success"] = df["mean_hydrophobic_rasa"].apply(to_success)
+    # Prefer the topology-gated success flag when present
+    if "rasa_success_after_topology_gate" in df.columns:
+        def normalize_success(x):
+            if pd.isna(x):
+                return None
+            return bool(int(x))
+        df["is_success"] = df["rasa_success_after_topology_gate"].apply(normalize_success)
+    else:
+        def to_success(x):
+            if pd.isna(x):
+                return None
+            return float(x) <= float(rasa_threshold)
+        df["is_success"] = df["mean_hydrophobic_rasa"].apply(to_success)
 
     def success_rate(series: pd.Series) -> float:
         vals = [v for v in series.tolist() if v is not None]
@@ -231,13 +206,10 @@ def _make_summary_table(
         .reset_index()
     )
 
-    # rounding
     for col in ["avg. confidence", "avg. helicity", "avg. hydrophobic rASA", "fraction_with_rasa_below_threshold"]:
         out[col] = out[col].astype(float).round(3)
 
-    # sequence length can be non-integer if mixed; keep one decimal
     out["sequence length"] = out["sequence length"].astype(float).round(1)
-
     return out
 
 
@@ -253,16 +225,12 @@ def main() -> None:
     if not pdb_paths:
         raise ValueError(f"No PDB files found in {pdb_dir} matching glob '{args.pdb_glob}'")
 
-    # ----------------------------
-    # Build explicit skip set (1-based positions, as PDB residue numbers)
-    # ----------------------------
     explicit_skip: Set[int] = set()
     if args.residues_to_skip is not None:
         explicit_skip = set(get_residues_to_skip_from_file(Path(args.residues_to_skip)))
 
     motifs: List[str] = args.skip_motif or []
 
-    # Only load sequences if motifs requested
     variant_seqs: Dict[str, str] = {}
     if motifs:
         if args.variants_fasta is None:
@@ -276,9 +244,6 @@ def main() -> None:
         print("[03_metrics] motif skip patterns:", motifs)
         print(f"[03_metrics] loaded sequences: {len(variant_seqs)}")
 
-    # ----------------------------
-    # Compute per-structure metrics (per-variant skip sets)
-    # ----------------------------
     metric_rows = []
     skipped_rows = []
 
@@ -289,7 +254,6 @@ def main() -> None:
 
         skip_set: Set[int] = set(explicit_skip)
 
-        # Add motif-derived skip positions
         if motifs:
             seq = variant_seqs.get(vid)
             if seq is None:
@@ -307,6 +271,10 @@ def main() -> None:
             rasa_threshold=float(args.rasa_threshold),
             model_index=int(args.model_index),
             residues_to_skip=skip_set,
+            apply_topology_check_with_rasa_gate=True,
+            helix_ranges=CENTROID_HELIX_RANGES,
+            chain_id=None,
+            abs_cosine_threshold=CENTROID_ABS_COSINE_THRESHOLD,
         )
 
         try:
@@ -320,9 +288,6 @@ def main() -> None:
                 reason=f"{type(e).__name__}: {e}",
             ))
 
-    # ----------------------------
-    # Write outputs
-    # ----------------------------
     per_structure_path = outdir / "structural_metrics_per_structure.csv"
     summary_path = outdir / "structural_metrics_summary.csv"
     skipped_path = outdir / "skipped_structures.csv"
@@ -340,6 +305,12 @@ def main() -> None:
             "n_helix_res",
             "n_hydrophobic_res",
             "mean_hydrophobic_rasa_leq_threshold",
+            "topology_checked_for_rasa_success",
+            "bad_topology_among_rasa_passers",
+            "rasa_success_after_topology_gate",
+            "topology_abs_cosine_similarity",
+            "topology_folded_angle_degrees",
+            "topology_failure_reason",
             "note",
         ],
     )
@@ -349,9 +320,6 @@ def main() -> None:
         empty_header=["variant_id", "pdb_path", "reason"],
     )
 
-    # ----------------------------
-    # Build summary
-    # ----------------------------
     vid_to_group = _read_variant_to_group_map(args.variants_metadata, args.group_column)
 
     df = pd.read_csv(per_structure_path)
@@ -373,8 +341,6 @@ def main() -> None:
         df[args.group_column] = df["variant_id"].apply(
             lambda vid: vid_to_group.get(str(vid), _default_group_from_variant_id(str(vid)))
         )
-
-        # sequence length proxy: DSSP residue count (already adjusted for skipping inside metrics)
         df["sequence_length"] = df["n_res_dssp"].astype(float)
 
         summary_df = _make_summary_table(

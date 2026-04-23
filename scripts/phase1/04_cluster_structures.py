@@ -32,7 +32,7 @@ from binpat.phase1.rmsd_clustering import (
     filter_structs_by_centroid_connectivity_among_rasa_passers,
 )
 
-CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(7, 11), (7, 11), (7, 11), (7, 11)]
+CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(3, 10), (20, 26), (36, 44), (54, 60)]
 CENTROID_ABS_COSINE_THRESHOLD: float = 0.6
 
 

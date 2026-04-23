@@ -33,7 +33,7 @@ from binpat.phase1.rmsd_clustering import (
 )
 
 CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(3, 10), (20, 26), (36, 44), (54, 60)]
-CENTROID_ABS_COSINE_THRESHOLD: float = 0.6
+CENTROID_ABS_COSINE_THRESHOLD: float = 0.2
 
 
 def parse_args() -> argparse.Namespace:

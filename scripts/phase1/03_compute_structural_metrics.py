@@ -37,7 +37,7 @@ from binpat.phase1.metrics import (
 )
 
 # Shortest-helix-compatible windows, as requested
-CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(7, 11), (7, 11), (7, 11), (7, 11)]
+CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(3, 10), (20, 26), (36, 44), (54, 60)]
 CENTROID_ABS_COSINE_THRESHOLD: float = 0.6
 
 

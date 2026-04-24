@@ -60,6 +60,12 @@ def parse_args() -> argparse.Namespace:
         help="Column name in variants-metadata to use for grouping (default: template_id).",
     )
 
+    p.add_argument(
+        "--apply_top_check_with_rasa_gate",
+        type=bool,
+        default=False,
+    )
+
     p.add_argument("--rasa-threshold", type=float, default=0.25, help="Success threshold for mean hydrophobic rASA.")
     p.add_argument("--model-index", type=int, default=0, help="Model index for multi-model PDBs (default: 0).")
 
@@ -271,7 +277,7 @@ def main() -> None:
             rasa_threshold=float(args.rasa_threshold),
             model_index=int(args.model_index),
             residues_to_skip=skip_set,
-            apply_topology_check_with_rasa_gate=True,
+            apply_topology_check_with_rasa_gate=args.apply_top_check_with_rasa_gate,
             helix_ranges=CENTROID_HELIX_RANGES,
             chain_id=None,
             abs_cosine_threshold=CENTROID_ABS_COSINE_THRESHOLD,

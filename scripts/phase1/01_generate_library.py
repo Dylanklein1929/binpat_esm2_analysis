@@ -14,7 +14,7 @@ Phase 1, Step 1:
     - skipped_templates.csv
 
 This script utilizes:
-- FASTA I/O, lives in binpat.io.fasta
+- FASTA I/O, in binpat.io.fasta
 - generation logic, lives in binpat.phase1.library
 
 Example:
@@ -50,7 +50,7 @@ from binpat.phase1.library import (
     generate_library_from_records,
 )
 
-
+#--read in args
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Generate hydrophobicity-constrained combinatorial libraries from natural or token FASTA."
@@ -77,7 +77,9 @@ def parse_args() -> argparse.Namespace:
 
     return p.parse_args()
 
-"""
+#--parse config .yaml file
+def load_phase1_config(path: str) -> tuple[LibrarySpec, Phase1Outputs]:
+    """
     Expects a config shaped like:
 
     randomization:
@@ -87,7 +89,6 @@ def parse_args() -> argparse.Namespace:
       hydrophobic: [A, V, I, L, M, F, W, Y]
       polar: [R, K, D, E, N, Q, S, T, H]
     """
-def load_phase1_config(path: str) -> tuple[LibrarySpec, Phase1Outputs]:
     cfg_path = Path(path)
     if not cfg_path.exists():
         raise FileNotFoundError(f"Config not found: {cfg_path}")
@@ -128,7 +129,7 @@ def load_phase1_config(path: str) -> tuple[LibrarySpec, Phase1Outputs]:
     return spec, outputs
 
 
-
+#--metadata for downstream steps and book-keeping
 def write_metadata_csv(rows: List[VariantMetadata], out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 

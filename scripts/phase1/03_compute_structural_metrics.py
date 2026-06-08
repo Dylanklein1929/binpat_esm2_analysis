@@ -36,7 +36,14 @@ from binpat.phase1.metrics import (
     get_residues_to_skip_from_file,
 )
 
-# Shortest-helix-compatible windows, as requested
+# Shortest-helix-compatible windows (for sequence set provided).
+'''
+These items are used for filtering out physically implausible structure predictions.
+The primary empirically observed conformation that was deemed physically unrealistic,
+and therefore should not be considered in downstream analyses, was one in which the 
+first and third helix-connecting loops criss-cross. A cosine score is used to detect
+the presence of these bad loop conformations.
+'''
 CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(3, 10), (20, 26), (36, 44), (54, 60)]
 CENTROID_ABS_COSINE_THRESHOLD: float = 0.2
 

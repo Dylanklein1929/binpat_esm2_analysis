@@ -21,7 +21,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -36,16 +36,17 @@ from binpat.phase1.metrics import (
     get_residues_to_skip_from_file,
 )
 
-# Shortest-helix-compatible windows (for sequence set provided).
-'''
-These items are used for filtering out physically implausible structure predictions.
-The primary empirically observed conformation that was deemed physically unrealistic,
-and therefore should not be considered in downstream analyses, was one in which the 
-first and third helix-connecting loops criss-cross. A cosine score is used to detect
-the presence of these bad loop conformations.
-'''
-CENTROID_HELIX_RANGES: List[Tuple[int, int]] = [(3, 10), (20, 26), (36, 44), (54, 60)]
-CENTROID_ABS_COSINE_THRESHOLD: float = 0.2
+# Topology-gate defaults.
+#
+# Helix ranges are derived separately for each structure from template
+# information embedded in variant_id, for example:
+#
+#   binpat_len_100|helices|21,20,20,21|loops|6,6,6|...
+#
+# By default, the central eight residues of each encoded helix are used to
+# calculate its centroid.
+DEFAULT_TOPOLOGY_HELIX_WINDOW_SIZE: int = 8
+DEFAULT_CENTROID_ABS_COSINE_THRESHOLD: float = 0.2
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,9 +69,40 @@ def parse_args() -> argparse.Namespace:
     )
 
     p.add_argument(
+        "--apply-top-check-with-rasa-gate",
         "--apply_top_check_with_rasa_gate",
-        type=bool,
-        default=False,
+        dest="apply_top_check_with_rasa_gate",
+        action="store_true",
+        help=(
+            "Apply the centroid-connectivity topology gate only after a "
+            "structure passes the hydrophobic-rASA threshold."
+        ),
+    )
+    p.add_argument(
+        "--topology-helix-window-size",
+        type=int,
+        default=DEFAULT_TOPOLOGY_HELIX_WINDOW_SIZE,
+        help=(
+            "Number of central residues from each template-defined helix to "
+            "use for its centroid (default: 8)."
+        ),
+    )
+    p.add_argument(
+        "--use-full-topology-helices",
+        action="store_true",
+        help=(
+            "Use each full template-defined helix for its centroid instead "
+            "of a fixed-width central window."
+        ),
+    )
+    p.add_argument(
+        "--topology-abs-cosine-threshold",
+        type=float,
+        default=DEFAULT_CENTROID_ABS_COSINE_THRESHOLD,
+        help=(
+            "Minimum absolute cosine similarity required to pass the "
+            "topology gate (default: 0.2)."
+        ),
     )
 
     p.add_argument("--rasa-threshold", type=float, default=0.25, help="Success threshold for mean hydrophobic rASA.")
@@ -228,6 +260,18 @@ def _make_summary_table(
 
 def main() -> None:
     args = parse_args()
+
+    if args.topology_helix_window_size <= 0:
+        raise ValueError("--topology-helix-window-size must be a positive integer.")
+    if not 0.0 <= args.topology_abs_cosine_threshold <= 1.0:
+        raise ValueError("--topology-abs-cosine-threshold must be between 0 and 1.")
+
+    topology_window_size: Optional[int]
+    if args.use_full_topology_helices:
+        topology_window_size = None
+    else:
+        topology_window_size = int(args.topology_helix_window_size)
+
     outdir = Path(args.outdir)
     pdb_dir = Path(args.pdb_dir) if args.pdb_dir else (outdir / "pdbs")
 
@@ -253,6 +297,21 @@ def main() -> None:
             raise ValueError(f"No sequences loaded from --variants-fasta: {args.variants_fasta}")
 
     print("[03_metrics] explicit skip positions (1-based):", sorted(explicit_skip))
+    if args.apply_top_check_with_rasa_gate:
+        window_description = (
+            "full template-defined helices"
+            if topology_window_size is None
+            else f"central {topology_window_size} residues per template-defined helix"
+        )
+        print("[03_metrics] topology gate: enabled")
+        print("[03_metrics] topology helix ranges:", window_description)
+        print(
+            "[03_metrics] topology abs-cosine threshold:",
+            float(args.topology_abs_cosine_threshold),
+        )
+    else:
+        print("[03_metrics] topology gate: disabled")
+
     if motifs:
         print("[03_metrics] motif skip patterns:", motifs)
         print(f"[03_metrics] loaded sequences: {len(variant_seqs)}")
@@ -284,10 +343,16 @@ def main() -> None:
             rasa_threshold=float(args.rasa_threshold),
             model_index=int(args.model_index),
             residues_to_skip=skip_set,
-            apply_topology_check_with_rasa_gate=args.apply_top_check_with_rasa_gate,
-            helix_ranges=CENTROID_HELIX_RANGES,
+            apply_topology_check_with_rasa_gate=bool(
+                args.apply_top_check_with_rasa_gate
+            ),
+            derive_helix_ranges_from_variant_id=True,
+            helix_ranges=None,
+            topology_helix_window_size=topology_window_size,
             chain_id=None,
-            abs_cosine_threshold=CENTROID_ABS_COSINE_THRESHOLD,
+            abs_cosine_threshold=float(
+                args.topology_abs_cosine_threshold
+            ),
         )
 
         try:
@@ -324,6 +389,8 @@ def main() -> None:
             "topology_abs_cosine_similarity",
             "topology_folded_angle_degrees",
             "topology_failure_reason",
+            "topology_helix_ranges",
+            "topology_helix_range_source",
             "note",
         ],
     )

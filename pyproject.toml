@@ -17,11 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 gpu = [
     "torch",
-    "torchvision",
-    "torchaudio",
     "fair-esm",
-    "transformers",
-    "accelerate",
 ]
 
 [build-system]
@@ -33,4 +29,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
